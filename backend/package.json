@@ -1,0 +1,33 @@
+{
+  "name": "cigsa-backend",
+  "version": "1.0.0",
+  "description": "Backend API for CIGSA Work Order Management System",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "create-admin": "node scripts/create-admin.js",
+    "migrate-equipment": "node scripts/migrate-equipment-schema.js",
+    "import-equipment": "node scripts/import-equipment-from-excel.js",
+    "associate-manual": "node scripts/associate-manual-to-equipment.js",
+    "create-missing-tables": "node scripts/create-missing-tables.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-validator": "^7.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.6.5",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

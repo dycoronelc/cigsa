@@ -1,0 +1,595 @@
+import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { getConnection } from '../config/database.js';
+import { authenticateToken, requireRole } from '../middleware/auth.js';
+import { activityLogger, logActivity } from '../middleware/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const router = express.Router();
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadPath = file.fieldname === 'document' 
+      ? path.join(__dirname, '..', 'uploads', 'documents')
+      : path.join(__dirname, '..', 'uploads', 'photos');
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
+
+// Get all work orders (admin sees all, technician sees only assigned)
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    const pool = await getConnection();
+    let query = `
+      SELECT 
+        wo.*,
+        c.name as client_name,
+        c.company_name,
+        e.serial_number,
+        CONCAT(eb.name, ' ', em.model_name, ' - ', e.serial_number) as equipment_name,
+        em.model_name,
+        eb.name as brand_name,
+        s.name as service_name,
+        s.code as service_code,
+        u.full_name as technician_name,
+        creator.full_name as created_by_name
+      FROM work_orders wo
+      LEFT JOIN clients c ON wo.client_id = c.id
+      LEFT JOIN equipment e ON wo.equipment_id = e.id
+      LEFT JOIN equipment_models em ON e.model_id = em.id
+      LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
+      LEFT JOIN services s ON wo.service_id = s.id
+      LEFT JOIN users u ON wo.assigned_technician_id = u.id
+      LEFT JOIN users creator ON wo.created_by = creator.id
+    `;
+    
+    const params = [];
+    
+    if (req.user.role === 'technician') {
+      query += ' WHERE wo.assigned_technician_id = ?';
+      params.push(req.user.id);
+    }
+    
+    query += ' ORDER BY wo.created_at DESC';
+    
+    const [orders] = await pool.query(query, params);
+    res.json(orders);
+  } catch (error) {
+    console.error('Get work orders error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get work order by ID with all details
+router.get('/:id', authenticateToken, async (req, res) => {
+  try {
+    const pool = await getConnection();
+    
+    // Get work order
+    const [orders] = await pool.query(`
+      SELECT 
+        wo.*,
+        c.name as client_name,
+        c.company_name,
+        c.email as client_email,
+        c.phone as client_phone,
+        e.serial_number,
+        e.location,
+        e.description as equipment_description,
+        CONCAT(eb.name, ' ', em.model_name, ' - ', e.serial_number) as equipment_name,
+        em.model_name,
+        em.components as equipment_components,
+        eb.name as brand_name,
+        eb.id as brand_id,
+        em.id as model_id,
+        s.name as service_name,
+        s.code as service_code,
+        s.description as service_description,
+        u.full_name as technician_name,
+        u.phone as technician_phone,
+        creator.full_name as created_by_name
+      FROM work_orders wo
+      LEFT JOIN clients c ON wo.client_id = c.id
+      LEFT JOIN equipment e ON wo.equipment_id = e.id
+      LEFT JOIN equipment_models em ON e.model_id = em.id
+      LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
+      LEFT JOIN services s ON wo.service_id = s.id
+      LEFT JOIN users u ON wo.assigned_technician_id = u.id
+      LEFT JOIN users creator ON wo.created_by = creator.id
+      WHERE wo.id = ?
+    `, [req.params.id]);
+    
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+    
+    const order = orders[0];
+    
+    // Check permissions
+    if (req.user.role === 'technician' && order.assigned_technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    // Get measurements
+    const [measurements] = await pool.query(
+      'SELECT * FROM measurements WHERE work_order_id = ? ORDER BY measurement_date',
+      [req.params.id]
+    );
+    
+    // Get photos
+    const [photos] = await pool.query(
+      'SELECT * FROM work_order_photos WHERE work_order_id = ? ORDER BY created_at',
+      [req.params.id]
+    );
+    
+    // Get observations
+    const [observations] = await pool.query(`
+      SELECT wo.*, u.full_name as created_by_name 
+      FROM work_order_observations wo
+      LEFT JOIN users u ON wo.created_by = u.id
+      WHERE wo.work_order_id = ? 
+      ORDER BY wo.created_at
+    `, [req.params.id]);
+    
+    // Get documents - include equipment documents and work order specific documents
+    let documents = [];
+    try {
+      const [docResults] = await pool.query(`
+        SELECT 
+          wod.*,
+          ed.brand_id as equipment_brand_id,
+          ed.model_id as equipment_model_id,
+          ed.housing_id as equipment_housing_id,
+          CASE 
+            WHEN wodp.id IS NOT NULL THEN wodp.is_visible_to_technician
+            ELSE TRUE
+          END as is_visible_to_technician
+        FROM work_order_documents wod
+        LEFT JOIN equipment_documents ed ON wod.equipment_document_id = ed.id
+        LEFT JOIN work_order_document_permissions wodp ON wod.id = wodp.document_id AND wodp.work_order_id = ?
+        WHERE wod.work_order_id = ? OR wod.equipment_id = ?
+        ORDER BY wod.created_at
+      `, [req.params.id, req.params.id, order.equipment_id]);
+      documents = docResults || [];
+    } catch (error) {
+      console.error('Error fetching work order documents:', error);
+      documents = [];
+    }
+    
+    // Also get equipment documents that should be available for this equipment
+    if (order.equipment_id) {
+      // Get equipment details to find brand, model, housing
+      const [equipDetails] = await pool.query(`
+        SELECT e.housing_id, em.brand_id, em.id as model_id
+        FROM equipment e
+        JOIN equipment_models em ON e.model_id = em.id
+        WHERE e.id = ?
+      `, [order.equipment_id]);
+      
+      if (equipDetails.length > 0) {
+        const eq = equipDetails[0];
+        // Get equipment documents for this brand, model, and housing
+        const [equipDocs] = await pool.query(`
+          SELECT ed.*, 
+            CASE 
+              WHEN wodp.id IS NOT NULL THEN wodp.is_visible_to_technician
+              ELSE TRUE
+            END as is_visible_to_technician
+          FROM equipment_documents ed
+          LEFT JOIN work_order_documents wod ON wod.equipment_document_id = ed.id AND wod.work_order_id = ?
+          LEFT JOIN work_order_document_permissions wodp ON wod.id = wodp.document_id AND wodp.work_order_id = ?
+          WHERE (ed.brand_id = ? OR ed.model_id = ? OR ed.housing_id = ?)
+            AND wod.id IS NULL
+        `, [req.params.id, req.params.id, eq.brand_id, eq.model_id, eq.housing_id || -1]);
+        
+        // Add equipment documents that aren't already in documents array
+        const existingDocIds = new Set(documents.map(d => d.equipment_document_id).filter(Boolean));
+        equipDocs.forEach(ed => {
+          if (!existingDocIds.has(ed.id)) {
+            documents.push({
+              ...ed,
+              id: `equip_${ed.id}`,
+              is_equipment_document: true
+            });
+          }
+        });
+      }
+    }
+    
+    res.json({
+      ...order,
+      measurements,
+      photos,
+      observations,
+      documents
+    });
+  } catch (error) {
+    console.error('Get work order error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create work order
+router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'work_order'), async (req, res) => {
+  try {
+    const { clientId, equipmentId, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
+    
+    if (!clientId || !equipmentId || !title) {
+      return res.status(400).json({ error: 'Client, equipment, and title are required' });
+    }
+    
+    const pool = await getConnection();
+    
+    // Generate order number
+    const [count] = await pool.query('SELECT COUNT(*) as count FROM work_orders');
+    const orderNumber = `OT-${String(count[0].count + 1).padStart(6, '0')}`;
+    
+    const [result] = await pool.query(
+      `INSERT INTO work_orders 
+       (order_number, client_id, equipment_id, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        orderNumber,
+        clientId,
+        equipmentId,
+        assignedTechnicianId || null,
+        title,
+        description || null,
+        priority || 'medium',
+        scheduledDate || null,
+        req.user.id,
+        assignedTechnicianId ? 'assigned' : 'created'
+      ]
+    );
+    
+    await logActivity(req.user.id, 'CREATE', 'work_order', result.insertId, `Created work order ${orderNumber}`, req.ip);
+    
+    res.status(201).json({ id: result.insertId, orderNumber, message: 'Work order created successfully' });
+  } catch (error) {
+    console.error('Create work order error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update work order
+router.put('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { title, description, priority, scheduledDate, assignedTechnicianId, status } = req.body;
+    const pool = await getConnection();
+    
+    // Check permissions
+    const [orders] = await pool.query('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+    
+    const order = orders[0];
+    
+    // Technicians can only update status and start/completion dates
+    if (req.user.role === 'technician') {
+      if (order.assigned_technician_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      
+      const updateFields = [];
+      const updateValues = [];
+      
+      if (status !== undefined) {
+        updateFields.push('status = ?');
+        updateValues.push(status);
+        
+        if (status === 'in_progress' && !order.start_date) {
+          updateFields.push('start_date = NOW()');
+        }
+        if (status === 'completed' && !order.completion_date) {
+          updateFields.push('completion_date = NOW()');
+        }
+      }
+      
+      if (updateFields.length === 0) {
+        return res.status(400).json({ error: 'No valid fields to update' });
+      }
+      
+      updateValues.push(req.params.id);
+      await pool.query(`UPDATE work_orders SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
+      
+      await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, `Updated work order status to ${status}`, req.ip);
+      
+      return res.json({ message: 'Work order updated successfully' });
+    }
+    
+    // Admin can update all fields
+    const updateFields = [];
+    const updateValues = [];
+    
+    if (title !== undefined) {
+      updateFields.push('title = ?');
+      updateValues.push(title);
+    }
+    if (description !== undefined) {
+      updateFields.push('description = ?');
+      updateValues.push(description);
+    }
+    if (priority !== undefined) {
+      updateFields.push('priority = ?');
+      updateValues.push(priority);
+    }
+    if (scheduledDate !== undefined) {
+      updateFields.push('scheduled_date = ?');
+      updateValues.push(scheduledDate);
+    }
+    if (assignedTechnicianId !== undefined) {
+      updateFields.push('assigned_technician_id = ?');
+      updateFields.push('status = ?');
+      updateValues.push(assignedTechnicianId);
+      updateValues.push(assignedTechnicianId ? 'assigned' : 'created');
+    }
+    if (status !== undefined) {
+      updateFields.push('status = ?');
+      updateValues.push(status);
+      
+      if (status === 'in_progress' && !order.start_date) {
+        updateFields.push('start_date = NOW()');
+      }
+      if (status === 'completed' && !order.completion_date) {
+        updateFields.push('completion_date = NOW()');
+      }
+    }
+    
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+    
+    updateValues.push(req.params.id);
+    await pool.query(`UPDATE work_orders SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
+    
+    await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, 'Updated work order', req.ip);
+    
+    res.json({ message: 'Work order updated successfully' });
+  } catch (error) {
+    console.error('Update work order error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Add measurement (initial or final)
+router.post('/:id/measurements', authenticateToken, async (req, res) => {
+  try {
+    const { measurementType, temperature, pressure, voltage, current, resistance, otherMeasurements, notes } = req.body;
+    
+    if (!measurementType || !['initial', 'final'].includes(measurementType)) {
+      return res.status(400).json({ error: 'Valid measurement type (initial/final) is required' });
+    }
+    
+    const pool = await getConnection();
+    
+    // Check permissions
+    const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+    
+    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const [result] = await pool.query(
+      `INSERT INTO measurements 
+       (work_order_id, measurement_type, measurement_date, temperature, pressure, voltage, current, resistance, other_measurements, notes, taken_by)
+       VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.params.id,
+        measurementType,
+        temperature || null,
+        pressure || null,
+        voltage || null,
+        current || null,
+        resistance || null,
+        otherMeasurements ? JSON.stringify(otherMeasurements) : null,
+        notes || null,
+        req.user.id
+      ]
+    );
+    
+    await logActivity(req.user.id, 'CREATE', 'measurement', result.insertId, `Added ${measurementType} measurement`, req.ip);
+    
+    res.status(201).json({ id: result.insertId, message: 'Measurement added successfully' });
+  } catch (error) {
+    console.error('Add measurement error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Upload photo
+router.post('/:id/photos', authenticateToken, upload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Photo file is required' });
+    }
+    
+    const { photoType, description } = req.body;
+    const pool = await getConnection();
+    
+    // Check permissions
+    const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+    
+    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const [result] = await pool.query(
+      `INSERT INTO work_order_photos (work_order_id, photo_path, photo_type, description, uploaded_by)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        req.params.id,
+        `/uploads/photos/${req.file.filename}`,
+        photoType || 'during_service',
+        description || null,
+        req.user.id
+      ]
+    );
+    
+    await logActivity(req.user.id, 'CREATE', 'photo', result.insertId, 'Uploaded photo', req.ip);
+    
+    res.status(201).json({ 
+      id: result.insertId, 
+      photoPath: `/uploads/photos/${req.file.filename}`,
+      message: 'Photo uploaded successfully' 
+    });
+  } catch (error) {
+    console.error('Upload photo error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Add observation
+router.post('/:id/observations', authenticateToken, async (req, res) => {
+  try {
+    const { observation, observationType } = req.body;
+    
+    if (!observation) {
+      return res.status(400).json({ error: 'Observation text is required' });
+    }
+    
+    const pool = await getConnection();
+    
+    // Check permissions
+    const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+    
+    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const [result] = await pool.query(
+      `INSERT INTO work_order_observations (work_order_id, observation, observation_type, created_by)
+       VALUES (?, ?, ?, ?)`,
+      [req.params.id, observation, observationType || 'general', req.user.id]
+    );
+    
+    await logActivity(req.user.id, 'CREATE', 'observation', result.insertId, 'Added observation', req.ip);
+    
+    res.status(201).json({ id: result.insertId, message: 'Observation added successfully' });
+  } catch (error) {
+    console.error('Add observation error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Upload document
+router.post('/:id/documents', authenticateToken, upload.single('document'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Document file is required' });
+    }
+    
+    const { documentType, description, equipmentId } = req.body;
+    const pool = await getConnection();
+    
+    // Check permissions
+    const [orders] = await pool.query('SELECT equipment_id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+    
+    const [result] = await pool.query(
+      `INSERT INTO work_order_documents 
+       (work_order_id, equipment_id, document_type, file_path, file_name, file_size, mime_type, description, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.params.id,
+        equipmentId || orders[0].equipment_id,
+        documentType || 'other',
+        `/uploads/documents/${req.file.filename}`,
+        req.file.originalname,
+        req.file.size,
+        req.file.mimetype,
+        description || null,
+        req.user.id
+      ]
+    );
+    
+    await logActivity(req.user.id, 'CREATE', 'document', result.insertId, 'Uploaded document', req.ip);
+    
+    res.status(201).json({ 
+      id: result.insertId, 
+      filePath: `/uploads/documents/${req.file.filename}`,
+      message: 'Document uploaded successfully' 
+    });
+  } catch (error) {
+    console.error('Upload document error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get activity log for work order
+router.get('/:id/activity', authenticateToken, async (req, res) => {
+  try {
+    const pool = await getConnection();
+    const [logs] = await pool.query(`
+      SELECT al.*, u.full_name as user_name
+      FROM activity_log al
+      LEFT JOIN users u ON al.user_id = u.id
+      WHERE al.entity_type = 'work_order' AND al.entity_id = ?
+      ORDER BY al.created_at DESC
+    `, [req.params.id]);
+    
+    res.json(logs);
+  } catch (error) {
+    console.error('Get activity log error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update document permissions for work order
+router.put('/:id/documents/permissions', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { documentPermissions } = req.body; // Array of { documentId, isVisibleToTechnician }
+    const pool = await getConnection();
+    
+    // Verify work order exists
+    const [orders] = await pool.query('SELECT id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+    
+    // Delete existing permissions for this work order
+    await pool.query('DELETE FROM work_order_document_permissions WHERE work_order_id = ?', [req.params.id]);
+    
+    // Insert new permissions
+    if (documentPermissions && documentPermissions.length > 0) {
+      const values = documentPermissions.map(dp => [req.params.id, dp.documentId, dp.isVisibleToTechnician ? 1 : 0]);
+      await pool.query(
+        'INSERT INTO work_order_document_permissions (work_order_id, document_id, is_visible_to_technician) VALUES ?',
+        [values]
+      );
+    }
+    
+    res.json({ message: 'Document permissions updated successfully' });
+  } catch (error) {
+    console.error('Update document permissions error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+export default router;
+
