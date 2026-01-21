@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { getStaticUrl } from '../../config.js';
+import { useAlert } from '../../hooks/useAlert';
+import AlertDialog from '../../components/AlertDialog';
 import './WorkOrderDetail.css';
 
 export default function WorkOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { alertDialog, showError, closeAlert } = useAlert();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('details');
@@ -32,7 +35,7 @@ export default function WorkOrderDetail() {
       fetchOrder();
     } catch (error) {
       console.error('Error updating status:', error);
-      alert('Error al actualizar el estado');
+      showError('Error al actualizar el estado');
     }
   };
 
@@ -42,7 +45,7 @@ export default function WorkOrderDetail() {
       fetchOrder();
     } catch (error) {
       console.error('Error assigning technician:', error);
-      alert('Error al asignar técnico');
+      showError('Error al asignar técnico');
     }
   };
 
@@ -389,7 +392,7 @@ export default function WorkOrderDetail() {
                                 fetchOrder();
                               } catch (error) {
                                 console.error('Error updating document permission:', error);
-                                alert('Error al actualizar el permiso del documento');
+                                showError('Error al actualizar el permiso del documento');
                               }
                             }}
                             title="Visible para técnico"
@@ -432,6 +435,16 @@ export default function WorkOrderDetail() {
           </div>
         )}
       </div>
+
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+      />
     </div>
   );
 }

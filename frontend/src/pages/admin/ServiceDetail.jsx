@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { useAlert } from '../../hooks/useAlert';
+import AlertDialog from '../../components/AlertDialog';
 import './ServiceDetail.css';
 
 export default function ServiceDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { alertDialog, showError, showSuccess, closeAlert } = useAlert();
   const [service, setService] = useState(null);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +58,7 @@ export default function ServiceDetail() {
       });
     } catch (error) {
       console.error('Error fetching service:', error);
-      alert('Error al cargar el servicio');
+      showError('Error al cargar el servicio');
     } finally {
       setLoading(false);
     }
@@ -76,10 +79,10 @@ export default function ServiceDetail() {
       await api.put(`/services/${id}`, data);
       setIsEditing(false);
       fetchService();
-      alert('Servicio actualizado exitosamente');
+      showSuccess('Servicio actualizado exitosamente');
     } catch (error) {
       console.error('Error updating service:', error);
-      alert(error.response?.data?.error || 'Error al actualizar el servicio');
+      showError(error.response?.data?.error || 'Error al actualizar el servicio');
     }
   };
 
@@ -473,6 +476,16 @@ export default function ServiceDetail() {
           </div>
         )}
       </div>
+
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+      />
     </div>
   );
 }

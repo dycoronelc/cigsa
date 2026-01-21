@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { EditIcon, DeleteIcon, SearchIcon } from '../../components/Icons';
+import { useAlert } from '../../hooks/useAlert';
+import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
 export default function Services() {
   const navigate = useNavigate();
+  const { alertDialog, showError, showConfirm, closeAlert } = useAlert();
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -60,7 +63,7 @@ export default function Services() {
       setFormData({ code: '', name: '', description: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
       fetchServicesAndCategories();
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al guardar servicio');
+      showError(error.response?.data?.error || 'Error al guardar servicio');
     }
   };
 
@@ -69,14 +72,14 @@ export default function Services() {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('¿Está seguro de desactivar este servicio?')) {
+    showConfirm('¿Está seguro de desactivar este servicio?', async () => {
       try {
         await api.delete(`/services/${id}`);
         fetchServicesAndCategories();
       } catch (error) {
-        alert('Error al desactivar servicio');
+        showError('Error al desactivar servicio');
       }
-    }
+    });
   };
 
   const handleCloseModal = () => {
@@ -228,6 +231,16 @@ export default function Services() {
           <p>No hay servicios registrados</p>
         </div>
       )}
+
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+      />
     </div>
   );
 }

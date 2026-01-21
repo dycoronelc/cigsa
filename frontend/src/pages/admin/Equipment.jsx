@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { getStaticUrl } from '../../config.js';
 import { EditIcon, DeleteIcon, SearchIcon } from '../../components/Icons';
+import { useAlert } from '../../hooks/useAlert';
+import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
 export default function Equipment() {
@@ -60,6 +62,9 @@ export default function Equipment() {
   const [equipmentFilter, setEquipmentFilter] = useState('');
 
   const [loading, setLoading] = useState(true);
+
+  // Alert Dialog
+  const { alertDialog, showError, showSuccess, showWarning, showConfirm, closeAlert } = useAlert();
 
   useEffect(() => {
     fetchData();
@@ -155,6 +160,16 @@ export default function Equipment() {
     }
   };
 
+  const fetchEquipmentDocuments = async () => {
+    try {
+      const response = await api.get('/equipment/documents');
+      setEquipmentDocuments(response.data);
+    } catch (error) {
+      console.error('Error fetching equipment documents:', error);
+      showError('Error al cargar los documentos de equipos');
+    }
+  };
+
   // Brands handlers
   const handleBrandSubmit = async (e) => {
     e.preventDefault();
@@ -169,7 +184,7 @@ export default function Equipment() {
       setEditingBrand(null);
       fetchBrands();
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al guardar la marca');
+      showError(error.response?.data?.error || 'Error al guardar la marca');
     }
   };
 
@@ -192,7 +207,7 @@ export default function Equipment() {
       setEditingModel(null);
       fetchModels(selectedBrandId || null);
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al guardar el modelo');
+      showError(error.response?.data?.error || 'Error al guardar el modelo');
     }
   };
 
@@ -215,7 +230,7 @@ export default function Equipment() {
       setEditingHousing(null);
       fetchHousings(selectedModelIdForHousing || null);
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al guardar el alojamiento');
+      showError(error.response?.data?.error || 'Error al guardar el alojamiento');
     }
   };
 
@@ -230,20 +245,21 @@ export default function Equipment() {
   };
 
   const handleDeleteHousing = async (id) => {
-    if (!window.confirm('¿Está seguro de desactivar este alojamiento?')) return;
-    try {
-      await api.put(`/equipment/housings/${id}`, { isActive: false });
-      fetchHousings(selectedModelIdForHousing || null);
-    } catch (error) {
-      alert('Error al desactivar el alojamiento');
-    }
+    showConfirm('¿Está seguro de desactivar este alojamiento?', async () => {
+      try {
+        await api.put(`/equipment/housings/${id}`, { isActive: false });
+        fetchHousings(selectedModelIdForHousing || null);
+      } catch (error) {
+        showError('Error al desactivar el alojamiento');
+      }
+    });
   };
 
   // Documents handlers
   const handleDocumentSubmit = async (e) => {
     e.preventDefault();
     if (!documentFile) {
-      alert('Por favor seleccione un archivo');
+      showWarning('Por favor seleccione un archivo', 'Archivo requerido');
       return;
     }
     try {
@@ -262,19 +278,21 @@ export default function Equipment() {
       setDocumentFormData({ brandId: '', modelId: '', documentType: 'manual', description: '' });
       setDocumentFile(null);
       fetchEquipmentDocuments();
+      showSuccess('Documento subido correctamente');
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al subir el documento');
+      showError(error.response?.data?.error || 'Error al subir el documento');
     }
   };
 
   const handleDeleteDocument = async (id) => {
-    if (!window.confirm('¿Está seguro de eliminar este documento?')) return;
-    try {
-      await api.delete(`/equipment/documents/${id}`);
-      fetchEquipmentDocuments();
-    } catch (error) {
-      alert('Error al eliminar el documento');
-    }
+    showConfirm('¿Está seguro de eliminar este documento?', async () => {
+      try {
+        await api.delete(`/equipment/documents/${id}`);
+        fetchEquipmentDocuments();
+      } catch (error) {
+        showError('Error al eliminar el documento');
+      }
+    });
   };
 
   // Equipment handlers
@@ -299,7 +317,7 @@ export default function Equipment() {
       setEquipmentModalBrandId('');
       fetchEquipment();
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al guardar el equipo');
+      showError(error.response?.data?.error || 'Error al guardar el equipo');
     }
   };
 
@@ -329,13 +347,14 @@ export default function Equipment() {
   };
 
   const handleDeleteEquipment = async (id) => {
-    if (!window.confirm('¿Está seguro de desactivar este equipo?')) return;
-    try {
-      await api.delete(`/equipment/${id}`);
-      fetchEquipment();
-    } catch (error) {
-      alert('Error al desactivar el equipo');
-    }
+    showConfirm('¿Está seguro de desactivar este equipo?', async () => {
+      try {
+        await api.delete(`/equipment/${id}`);
+        fetchEquipment();
+      } catch (error) {
+        showError('Error al desactivar el equipo');
+      }
+    });
   };
 
   if (loading) return <div className="loading">Cargando...</div>;
@@ -969,6 +988,17 @@ export default function Equipment() {
           </div>
         </div>
       )}
+
+      {/* Alert Dialog */}
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+      />
     </div>
   );
 }

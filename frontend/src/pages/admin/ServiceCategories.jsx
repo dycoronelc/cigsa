@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { EditIcon, DeleteIcon, SearchIcon } from '../../components/Icons';
+import { useAlert } from '../../hooks/useAlert';
+import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
 export default function ServiceCategories() {
+  const { alertDialog, showError, showConfirm, closeAlert } = useAlert();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -70,18 +73,19 @@ export default function ServiceCategories() {
       closeModal();
       fetchCategories();
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al guardar categoría');
+      showError(error.response?.data?.error || 'Error al guardar categoría');
     }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Está seguro de desactivar esta categoría?')) return;
-    try {
-      await api.delete(`/service-categories/${id}`);
-      fetchCategories();
-    } catch (error) {
-      alert(error.response?.data?.error || 'Error al desactivar categoría');
-    }
+    showConfirm('¿Está seguro de desactivar esta categoría?', async () => {
+      try {
+        await api.delete(`/service-categories/${id}`);
+        fetchCategories();
+      } catch (error) {
+        showError(error.response?.data?.error || 'Error al desactivar categoría');
+      }
+    });
   };
 
   if (loading) return <div className="loading">Cargando...</div>;
@@ -198,6 +202,16 @@ export default function ServiceCategories() {
           <p>No hay categorías registradas</p>
         </div>
       )}
+
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+      />
     </div>
   );
 }

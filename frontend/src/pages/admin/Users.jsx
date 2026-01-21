@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { EditIcon, SearchIcon } from '../../components/Icons';
+import { useAlert } from '../../hooks/useAlert';
+import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
 export default function Users() {
+  const { alertDialog, showError, closeAlert } = useAlert();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -72,7 +75,7 @@ export default function Users() {
       });
       fetchUsers();
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al guardar usuario');
+      showError(error.response?.data?.error || 'Error al guardar usuario');
     }
   };
 
@@ -235,6 +238,16 @@ export default function Users() {
           </tbody>
         </table>
       </div>
+
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+      />
     </div>
   );
 }

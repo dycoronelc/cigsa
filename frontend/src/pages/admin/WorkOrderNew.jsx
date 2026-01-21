@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { useAlert } from '../../hooks/useAlert';
+import AlertDialog from '../../components/AlertDialog';
 import './WorkOrderNew.css';
 
 export default function WorkOrderNew() {
   const navigate = useNavigate();
+  const { alertDialog, showError, showSuccess, showWarning, closeAlert } = useAlert();
   const [loading, setLoading] = useState(false);
   const [clients, setClients] = useState([]);
   const [equipment, setEquipment] = useState([]);
@@ -98,13 +101,13 @@ export default function WorkOrderNew() {
       const count = formData.serviceHousingCount ? parseInt(formData.serviceHousingCount) : 0;
       if (count > 0) {
         if (!serviceHousings || serviceHousings.length !== count) {
-          alert('Debe completar la información de los alojamientos antes de crear la orden.');
+          showWarning('Debe completar la información de los alojamientos antes de crear la orden.');
           setLoading(false);
           return;
         }
         const hasMissing = serviceHousings.some(h => !h.measureCode || !h.description || h.nominalValue === '' || !h.nominalUnit);
         if (hasMissing) {
-          alert('Complete Medida, Descripción, Medida Nominal y Unidad para cada alojamiento.');
+          showWarning('Complete Medida, Descripción, Medida Nominal y Unidad para cada alojamiento.');
           setLoading(false);
           return;
         }
@@ -128,10 +131,12 @@ export default function WorkOrderNew() {
         assignedTechnicianId: formData.assignedTechnicianId ? parseInt(formData.assignedTechnicianId) : null
       });
 
-      alert('Orden de trabajo creada exitosamente');
-      navigate(`/admin/work-orders/${response.data.id}`);
+      showSuccess('Orden de trabajo creada exitosamente');
+      setTimeout(() => {
+        navigate(`/admin/work-orders/${response.data.id}`);
+      }, 1000);
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al crear la orden de trabajo');
+      showError(error.response?.data?.error || 'Error al crear la orden de trabajo');
     } finally {
       setLoading(false);
     }
@@ -406,12 +411,12 @@ export default function WorkOrderNew() {
                 onClick={() => {
                   const count = parseInt(formData.serviceHousingCount) || 0;
                   if (count > 0 && serviceHousings.length !== count) {
-                    alert('Cantidad de alojamientos no coincide.');
+                    showWarning('Cantidad de alojamientos no coincide.');
                     return;
                   }
                   const hasMissing = serviceHousings.some(h => !h.measureCode || !h.description || h.nominalValue === '' || !h.nominalUnit);
                   if (hasMissing) {
-                    alert('Complete Descripción, Medida Nominal y Unidad para cada alojamiento.');
+                    showWarning('Complete Descripción, Medida Nominal y Unidad para cada alojamiento.');
                     return;
                   }
                   setShowHousingsModal(false);
@@ -423,6 +428,16 @@ export default function WorkOrderNew() {
           </div>
         </div>
       )}
+
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+      />
     </div>
   );
 }

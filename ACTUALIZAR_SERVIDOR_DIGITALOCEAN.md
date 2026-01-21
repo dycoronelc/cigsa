@@ -192,6 +192,91 @@ curl -sS http://127.0.0.1/api/health
 
 ## Solución de Problemas
 
+### Warnings EBADENGINE (Node.js versión antigua)
+
+Si ves warnings como:
+```
+npm WARN EBADENGINE Unsupported engine {
+  package: '@isaacs/balanced-match@4.0.1',
+  required: { node: '20 || >=22' },
+  current: { node: 'v18.19.1' }
+}
+```
+
+**Esto significa que necesitas actualizar Node.js a la versión 20 o superior.**
+
+#### Verificar versión actual:
+```bash
+node -v
+npm -v
+```
+
+#### Actualizar Node.js a versión 20 LTS:
+
+```bash
+# Detener PM2 temporalmente para evitar conflictos
+pm2 stop all
+
+# Instalar NodeSource repository para Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+
+# Actualizar Node.js
+sudo apt-get install -y nodejs
+
+# Verificar nueva versión
+node -v
+npm -v
+
+# Debería mostrar v20.x.x o superior
+```
+
+#### Reinstalar dependencias globales (si aplica):
+
+```bash
+# Reinstalar PM2 con la nueva versión de Node.js
+sudo npm install -g pm2
+
+# Verificar que PM2 funciona
+pm2 --version
+```
+
+#### Reinstalar dependencias del proyecto:
+
+```bash
+cd /var/www/cigsa/backend
+rm -rf node_modules package-lock.json
+npm install
+
+cd ../frontend
+rm -rf node_modules package-lock.json
+npm install
+npm run build
+```
+
+#### Reiniciar aplicaciones:
+
+```bash
+# Reiniciar backend con PM2
+cd /var/www/cigsa/backend
+pm2 restart cigsa-backend
+pm2 logs cigsa-backend --lines 20
+```
+
+#### Verificar que los warnings desaparecieron:
+
+```bash
+cd /var/www/cigsa/frontend
+npm install
+# Ya no deberían aparecer warnings EBADENGINE
+```
+
+> **Nota:** Si después de actualizar Node.js sigues viendo la versión antigua, puede ser que tengas múltiples instalaciones. Verifica con:
+> ```bash
+> which node
+> which npm
+> ```
+> Si apuntan a ubicaciones diferentes, puede ser necesario actualizar el PATH o usar `nvm` (Node Version Manager).
+
 ### Error: "npm: command not found"
 
 ```bash
@@ -275,11 +360,13 @@ sudo nginx -T | grep -A 5 "location /api"
 ## Checklist de Actualización
 
 - [ ] Conectado al servidor por SSH
+- [ ] Verificada versión de Node.js (`node -v` - debe ser 20.x o superior)
+- [ ] Si Node.js < 20, actualizado Node.js (ver sección "Warnings EBADENGINE")
 - [ ] Código actualizado con `git pull`
 - [ ] Dependencias del backend instaladas (`npm install`)
 - [ ] Backend reiniciado con PM2
 - [ ] Logs del backend verificados (sin errores)
-- [ ] Dependencias del frontend instaladas (`npm install`)
+- [ ] Dependencias del frontend instaladas (`npm install` - sin warnings EBADENGINE)
 - [ ] Frontend reconstruido (`npm run build`)
 - [ ] Nginx recargado
 - [ ] Health check del backend funciona

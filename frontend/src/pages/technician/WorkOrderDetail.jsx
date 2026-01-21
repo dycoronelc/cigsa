@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { getStaticUrl } from '../../config.js';
+import { useAlert } from '../../hooks/useAlert';
+import AlertDialog from '../../components/AlertDialog';
 import './Technician.css';
 
 export default function TechnicianWorkOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { alertDialog, showError, closeAlert } = useAlert();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('details');
@@ -46,7 +49,7 @@ export default function TechnicianWorkOrderDetail() {
       await api.put(`/work-orders/${id}`, { status: newStatus });
       fetchOrder();
     } catch (error) {
-      alert('Error al actualizar el estado');
+      showError('Error al actualizar el estado');
     }
   };
 
@@ -63,7 +66,7 @@ export default function TechnicianWorkOrderDetail() {
       });
       fetchOrder();
     } catch (error) {
-      alert('Error al guardar medición');
+      showError('Error al guardar medición');
     }
   };
 
@@ -77,7 +80,7 @@ export default function TechnicianWorkOrderDetail() {
       setShowPhotoModal(false);
       fetchOrder();
     } catch (error) {
-      alert('Error al subir foto');
+      showError('Error al subir foto');
     }
   };
 
@@ -89,7 +92,7 @@ export default function TechnicianWorkOrderDetail() {
       setObservationData({ observation: '', observationType: 'general' });
       fetchOrder();
     } catch (error) {
-      alert('Error al guardar observación');
+      showError('Error al guardar observación');
     }
   };
 
@@ -373,11 +376,21 @@ export default function TechnicianWorkOrderDetail() {
                              doc.document_type === 'blueprint' ? 'Plano' :
                              doc.document_type === 'specification' ? 'Especificación' : 'Otro'}
                           </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+        )}
+      </div>
+
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+      />
+    </div>
+  );
+})}
               </div>
             ) : (
               <p className="empty-message">No hay documentos</p>

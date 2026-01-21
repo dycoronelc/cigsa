@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { EditIcon, SearchIcon } from '../../components/Icons';
+import { useAlert } from '../../hooks/useAlert';
+import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
 export default function Clients() {
+  const { alertDialog, showError, closeAlert } = useAlert();
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -72,7 +75,7 @@ export default function Clients() {
       });
       fetchClients();
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al guardar cliente');
+      showError(error.response?.data?.error || 'Error al guardar cliente');
     }
   };
 
@@ -208,6 +211,16 @@ export default function Clients() {
           </tbody>
         </table>
       </div>
+
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+      />
     </div>
   );
 }

@@ -254,7 +254,237 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Get equipment by ID
+// ========== HOUSINGS ROUTES (must be before /:id) ==========
+
+// Get all housings
+router.get('/housings', authenticateToken, async (req, res) => {
+  try {
+    const { modelId } = req.query;
+    const pool = await getConnection();
+    
+    let query = `
+      SELECT eh.*, em.model_name, eb.name as brand_name
+      FROM equipment_housings eh
+      JOIN equipment_models em ON eh.model_id = em.id
+      JOIN equipment_brands eb ON em.brand_id = eb.id
+      WHERE eh.is_active = TRUE
+    `;
+    let params = [];
+
+    if (modelId) {
+      query += ' AND eh.model_id = ?';
+      params.push(modelId);
+    }
+
+    query += ' ORDER BY eb.name, em.model_name, eh.housing_name';
+    const [housings] = await pool.query(query, params);
+    res.json(housings);
+  } catch (error) {
+    console.error('Get housings error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create housing
+router.post('/housings', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'equipment_housing'), async (req, res) => {
+  try {
+    const { modelId, housingName, description } = req.body;
+    if (!modelId || !housingName) {
+      return res.status(400).json({ error: 'Model ID and housing name are required' });
+    }
+
+    const pool = await getConnection();
+    
+    // Verify model exists
+    const [model] = await pool.query('SELECT id FROM equipment_models WHERE id = ? AND is_active = TRUE', [modelId]);
+    if (model.length === 0) {
+      return res.status(400).json({ error: 'Invalid model ID' });
+    }
+
+    const [result] = await pool.query(
+      'INSERT INTO equipment_housings (model_id, housing_name, description) VALUES (?, ?, ?)',
+      [modelId, housingName, description || null]
+    );
+
+    res.status(201).json({ id: result.insertId, message: 'Housing created successfully' });
+  } catch (error) {
+    console.error('Create housing error:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ error: 'This model and housing combination already exists' });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update housing
+router.put('/housings/:id', authenticateToken, requireRole('admin'), activityLogger('UPDATE', 'equipment_housing'), async (req, res) => {
+  try {
+    const { modelId, housingName, description, isActive } = req.body;
+    const pool = await getConnection();
+
+    const updateFields = [];
+    const updateValues = [];
+
+    if (modelId !== undefined) {
+      const [model] = await pool.query('SELECT id FROM equipment_models WHERE id = ? AND is_active = TRUE', [modelId]);
+      if (model.length === 0) {
+        return res.status(400).json({ error: 'Invalid model ID' });
+      }
+      updateFields.push('model_id = ?');
+      updateValues.push(modelId);
+    }
+    if (housingName !== undefined) {
+      updateFields.push('housing_name = ?');
+      updateValues.push(housingName);
+    }
+    if (description !== undefined) {
+      updateFields.push('description = ?');
+      updateValues.push(description);
+    }
+    if (isActive !== undefined) {
+      updateFields.push('is_active = ?');
+      updateValues.push(isActive);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updateValues.push(req.params.id);
+    await pool.query(`UPDATE equipment_housings SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
+
+    res.json({ message: 'Housing updated successfully' });
+  } catch (error) {
+    console.error('Update housing error:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ error: 'This model and housing combination already exists' });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ========== EQUIPMENT DOCUMENTS ROUTES (must be before /:id) ==========
+
+// Get equipment documents (by brand, model, or housing)
+router.get('/documents', authenticateToken, async (req, res) => {
+  try {
+    const { brandId, modelId, housingId } = req.query;
+    const pool = await getConnection();
+    
+    let query = `
+      SELECT ed.*, 
+        eb.name as brand_name, 
+        em.model_name, 
+        eh.housing_name,
+        u.full_name as uploaded_by_name
+      FROM equipment_documents ed
+      LEFT JOIN equipment_brands eb ON ed.brand_id = eb.id
+      LEFT JOIN equipment_models em ON ed.model_id = em.id
+      LEFT JOIN equipment_housings eh ON ed.housing_id = eh.id
+      LEFT JOIN users u ON ed.uploaded_by = u.id
+      WHERE 1=1
+    `;
+    let params = [];
+
+    if (brandId) {
+      query += ' AND ed.brand_id = ?';
+      params.push(brandId);
+    }
+    if (modelId) {
+      query += ' AND ed.model_id = ?';
+      params.push(modelId);
+    }
+    if (housingId) {
+      query += ' AND ed.housing_id = ?';
+      params.push(housingId);
+    }
+
+    query += ' ORDER BY ed.created_at DESC';
+    const [documents] = await pool.query(query, params);
+    res.json(documents);
+  } catch (error) {
+    console.error('Get equipment documents error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Upload equipment document (brand, model, or housing)
+router.post('/documents', authenticateToken, requireRole('admin'), upload.single('document'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Document file is required' });
+    }
+
+    const { brandId, modelId, housingId, documentType, description } = req.body;
+    const pool = await getConnection();
+
+    // At least one ID must be provided
+    if (!brandId && !modelId && !housingId) {
+      return res.status(400).json({ error: 'At least one of brandId, modelId, or housingId is required' });
+    }
+
+    // Verify IDs exist if provided
+    if (brandId) {
+      const [brand] = await pool.query('SELECT id FROM equipment_brands WHERE id = ?', [brandId]);
+      if (brand.length === 0) {
+        return res.status(404).json({ error: 'Brand not found' });
+      }
+    }
+    if (modelId) {
+      const [model] = await pool.query('SELECT id FROM equipment_models WHERE id = ?', [modelId]);
+      if (model.length === 0) {
+        return res.status(404).json({ error: 'Model not found' });
+      }
+    }
+    if (housingId) {
+      const [housing] = await pool.query('SELECT id FROM equipment_housings WHERE id = ?', [housingId]);
+      if (housing.length === 0) {
+        return res.status(404).json({ error: 'Housing not found' });
+      }
+    }
+
+    const [result] = await pool.query(
+      `INSERT INTO equipment_documents 
+       (brand_id, model_id, housing_id, document_type, file_path, file_name, file_size, mime_type, description, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        brandId || null,
+        modelId || null,
+        housingId || null,
+        documentType || 'manual',
+        `/uploads/documents/${req.file.filename}`,
+        req.file.originalname,
+        req.file.size,
+        req.file.mimetype,
+        description || null,
+        req.user.id
+      ]
+    );
+
+    res.status(201).json({ 
+      id: result.insertId, 
+      filePath: `/uploads/documents/${req.file.filename}`,
+      message: 'Document uploaded successfully' 
+    });
+  } catch (error) {
+    console.error('Upload equipment document error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete equipment document
+router.delete('/documents/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const pool = await getConnection();
+    await pool.query('DELETE FROM equipment_documents WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Document deleted successfully' });
+  } catch (error) {
+    console.error('Delete equipment document error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get equipment by ID (must be after all specific routes)
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const pool = await getConnection();
@@ -477,236 +707,6 @@ router.get('/:id/documents', authenticateToken, async (req, res) => {
     res.json(documents);
   } catch (error) {
     console.error('Get equipment documents error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ========== HOUSINGS ROUTES ==========
-
-// Get all housings
-router.get('/housings', authenticateToken, async (req, res) => {
-  try {
-    const { modelId } = req.query;
-    const pool = await getConnection();
-    
-    let query = `
-      SELECT eh.*, em.model_name, eb.name as brand_name
-      FROM equipment_housings eh
-      JOIN equipment_models em ON eh.model_id = em.id
-      JOIN equipment_brands eb ON em.brand_id = eb.id
-      WHERE eh.is_active = TRUE
-    `;
-    let params = [];
-
-    if (modelId) {
-      query += ' AND eh.model_id = ?';
-      params.push(modelId);
-    }
-
-    query += ' ORDER BY eb.name, em.model_name, eh.housing_name';
-    const [housings] = await pool.query(query, params);
-    res.json(housings);
-  } catch (error) {
-    console.error('Get housings error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Create housing
-router.post('/housings', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'equipment_housing'), async (req, res) => {
-  try {
-    const { modelId, housingName, description } = req.body;
-    if (!modelId || !housingName) {
-      return res.status(400).json({ error: 'Model ID and housing name are required' });
-    }
-
-    const pool = await getConnection();
-    
-    // Verify model exists
-    const [model] = await pool.query('SELECT id FROM equipment_models WHERE id = ? AND is_active = TRUE', [modelId]);
-    if (model.length === 0) {
-      return res.status(400).json({ error: 'Invalid model ID' });
-    }
-
-    const [result] = await pool.query(
-      'INSERT INTO equipment_housings (model_id, housing_name, description) VALUES (?, ?, ?)',
-      [modelId, housingName, description || null]
-    );
-
-    res.status(201).json({ id: result.insertId, message: 'Housing created successfully' });
-  } catch (error) {
-    console.error('Create housing error:', error);
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(400).json({ error: 'This model and housing combination already exists' });
-    }
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Update housing
-router.put('/housings/:id', authenticateToken, requireRole('admin'), activityLogger('UPDATE', 'equipment_housing'), async (req, res) => {
-  try {
-    const { modelId, housingName, description, isActive } = req.body;
-    const pool = await getConnection();
-
-    const updateFields = [];
-    const updateValues = [];
-
-    if (modelId !== undefined) {
-      const [model] = await pool.query('SELECT id FROM equipment_models WHERE id = ? AND is_active = TRUE', [modelId]);
-      if (model.length === 0) {
-        return res.status(400).json({ error: 'Invalid model ID' });
-      }
-      updateFields.push('model_id = ?');
-      updateValues.push(modelId);
-    }
-    if (housingName !== undefined) {
-      updateFields.push('housing_name = ?');
-      updateValues.push(housingName);
-    }
-    if (description !== undefined) {
-      updateFields.push('description = ?');
-      updateValues.push(description);
-    }
-    if (isActive !== undefined) {
-      updateFields.push('is_active = ?');
-      updateValues.push(isActive);
-    }
-
-    if (updateFields.length === 0) {
-      return res.status(400).json({ error: 'No fields to update' });
-    }
-
-    updateValues.push(req.params.id);
-    await pool.query(`UPDATE equipment_housings SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
-
-    res.json({ message: 'Housing updated successfully' });
-  } catch (error) {
-    console.error('Update housing error:', error);
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(400).json({ error: 'This model and housing combination already exists' });
-    }
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ========== EQUIPMENT DOCUMENTS ROUTES ==========
-
-// Get equipment documents (by brand, model, or housing)
-router.get('/documents', authenticateToken, async (req, res) => {
-  try {
-    const { brandId, modelId, housingId } = req.query;
-    const pool = await getConnection();
-    
-    let query = `
-      SELECT ed.*, 
-        eb.name as brand_name, 
-        em.model_name, 
-        eh.housing_name,
-        u.full_name as uploaded_by_name
-      FROM equipment_documents ed
-      LEFT JOIN equipment_brands eb ON ed.brand_id = eb.id
-      LEFT JOIN equipment_models em ON ed.model_id = em.id
-      LEFT JOIN equipment_housings eh ON ed.housing_id = eh.id
-      LEFT JOIN users u ON ed.uploaded_by = u.id
-      WHERE 1=1
-    `;
-    let params = [];
-
-    if (brandId) {
-      query += ' AND ed.brand_id = ?';
-      params.push(brandId);
-    }
-    if (modelId) {
-      query += ' AND ed.model_id = ?';
-      params.push(modelId);
-    }
-    if (housingId) {
-      query += ' AND ed.housing_id = ?';
-      params.push(housingId);
-    }
-
-    query += ' ORDER BY ed.created_at DESC';
-    const [documents] = await pool.query(query, params);
-    res.json(documents);
-  } catch (error) {
-    console.error('Get equipment documents error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Upload equipment document (brand, model, or housing)
-router.post('/documents', authenticateToken, requireRole('admin'), upload.single('document'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Document file is required' });
-    }
-
-    const { brandId, modelId, housingId, documentType, description } = req.body;
-    const pool = await getConnection();
-
-    // At least one ID must be provided
-    if (!brandId && !modelId && !housingId) {
-      return res.status(400).json({ error: 'At least one of brandId, modelId, or housingId is required' });
-    }
-
-    // Verify IDs exist if provided
-    if (brandId) {
-      const [brand] = await pool.query('SELECT id FROM equipment_brands WHERE id = ?', [brandId]);
-      if (brand.length === 0) {
-        return res.status(404).json({ error: 'Brand not found' });
-      }
-    }
-    if (modelId) {
-      const [model] = await pool.query('SELECT id FROM equipment_models WHERE id = ?', [modelId]);
-      if (model.length === 0) {
-        return res.status(404).json({ error: 'Model not found' });
-      }
-    }
-    if (housingId) {
-      const [housing] = await pool.query('SELECT id FROM equipment_housings WHERE id = ?', [housingId]);
-      if (housing.length === 0) {
-        return res.status(404).json({ error: 'Housing not found' });
-      }
-    }
-
-    const [result] = await pool.query(
-      `INSERT INTO equipment_documents 
-       (brand_id, model_id, housing_id, document_type, file_path, file_name, file_size, mime_type, description, uploaded_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        brandId || null,
-        modelId || null,
-        housingId || null,
-        documentType || 'manual',
-        `/uploads/documents/${req.file.filename}`,
-        req.file.originalname,
-        req.file.size,
-        req.file.mimetype,
-        description || null,
-        req.user.id
-      ]
-    );
-
-    res.status(201).json({ 
-      id: result.insertId, 
-      filePath: `/uploads/documents/${req.file.filename}`,
-      message: 'Document uploaded successfully' 
-    });
-  } catch (error) {
-    console.error('Upload equipment document error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Delete equipment document
-router.delete('/documents/:id', authenticateToken, requireRole('admin'), async (req, res) => {
-  try {
-    const pool = await getConnection();
-    await pool.query('DELETE FROM equipment_documents WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Document deleted successfully' });
-  } catch (error) {
-    console.error('Delete equipment document error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
