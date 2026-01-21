@@ -88,7 +88,6 @@ router.get('/:id', authenticateToken, async (req, res) => {
         c.email as client_email,
         c.phone as client_phone,
         e.serial_number,
-        e.location,
         e.description as equipment_description,
         CONCAT(eb.name, ' ', em.model_name, ' - ', e.serial_number) as equipment_name,
         em.model_name,
@@ -129,6 +128,53 @@ router.get('/:id', authenticateToken, async (req, res) => {
       'SELECT * FROM measurements WHERE work_order_id = ? ORDER BY measurement_date',
       [req.params.id]
     );
+
+    // Get service housings for this work order
+    let serviceHousings = [];
+    try {
+      const [rows] = await pool.query(
+        'SELECT * FROM work_order_housings WHERE work_order_id = ? ORDER BY id',
+        [req.params.id]
+      );
+      serviceHousings = rows || [];
+    } catch (error) {
+      console.error('Error fetching work order housings:', error);
+      serviceHousings = [];
+    }
+
+    // Get housing measurements linked to measurement events
+    let housingMeasurementsByMeasurementId = new Map();
+    try {
+      const [rows] = await pool.query(`
+        SELECT 
+          wohm.*,
+          woh.measure_code,
+          woh.description as housing_description,
+          woh.nominal_value,
+          woh.nominal_unit
+        FROM work_order_housing_measurements wohm
+        JOIN work_order_housings woh ON wohm.housing_id = woh.id
+        JOIN measurements m ON wohm.measurement_id = m.id
+        WHERE m.work_order_id = ?
+        ORDER BY woh.id
+      `, [req.params.id]);
+
+      (rows || []).forEach((r) => {
+        const key = r.measurement_id;
+        if (!housingMeasurementsByMeasurementId.has(key)) {
+          housingMeasurementsByMeasurementId.set(key, []);
+        }
+        housingMeasurementsByMeasurementId.get(key).push(r);
+      });
+    } catch (error) {
+      console.error('Error fetching housing measurements:', error);
+      housingMeasurementsByMeasurementId = new Map();
+    }
+
+    const measurementsWithHousing = (measurements || []).map((m) => ({
+      ...m,
+      housing_measurements: housingMeasurementsByMeasurementId.get(m.id) || []
+    }));
     
     // Get photos
     const [photos] = await pool.query(
@@ -212,7 +258,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
     
     res.json({
       ...order,
-      measurements,
+      service_housings: serviceHousings,
+      measurements: measurementsWithHousing,
       photos,
       observations,
       documents
@@ -226,7 +273,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create work order
 router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'work_order'), async (req, res) => {
   try {
-    const { clientId, equipmentId, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
+    const { clientId, equipmentId, serviceId, serviceLocation, serviceHousings, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
     
     if (!clientId || !equipmentId || !title) {
       return res.status(400).json({ error: 'Client, equipment, and title are required' });
@@ -240,12 +287,15 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
     
     const [result] = await pool.query(
       `INSERT INTO work_orders 
-       (order_number, client_id, equipment_id, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (order_number, client_id, equipment_id, service_id, service_location, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         orderNumber,
         clientId,
         equipmentId,
+        serviceId || null,
+        serviceLocation || null,
+        Array.isArray(serviceHousings) ? serviceHousings.length : 0,
         assignedTechnicianId || null,
         title,
         description || null,
@@ -255,6 +305,28 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
         assignedTechnicianId ? 'assigned' : 'created'
       ]
     );
+
+    // Insert service housings if provided
+    if (Array.isArray(serviceHousings) && serviceHousings.length > 0) {
+      const values = serviceHousings.map((h) => ([
+        result.insertId,
+        h.measureCode || h.measure_code || null,
+        h.description || null,
+        h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? h.nominalValue : null,
+        h.unit || h.nominalUnit || h.nominal_unit || null
+      ]));
+
+      // Basic validation: measureCode must exist
+      if (values.some(v => !v[1])) {
+        return res.status(400).json({ error: 'Cada alojamiento debe tener un campo Medida (A, B, C...)' });
+      }
+
+      await pool.query(
+        `INSERT INTO work_order_housings (work_order_id, measure_code, description, nominal_value, nominal_unit)
+         VALUES ?`,
+        [values]
+      );
+    }
     
     await logActivity(req.user.id, 'CREATE', 'work_order', result.insertId, `Created work order ${orderNumber}`, req.ip);
     
@@ -268,7 +340,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
 // Update work order
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { title, description, priority, scheduledDate, assignedTechnicianId, status } = req.body;
+    const { title, description, priority, scheduledDate, assignedTechnicianId, status, serviceLocation, serviceId } = req.body;
     const pool = await getConnection();
     
     // Check permissions
@@ -328,6 +400,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
       updateFields.push('priority = ?');
       updateValues.push(priority);
     }
+    if (serviceId !== undefined) {
+      updateFields.push('service_id = ?');
+      updateValues.push(serviceId || null);
+    }
+    if (serviceLocation !== undefined) {
+      updateFields.push('service_location = ?');
+      updateValues.push(serviceLocation || null);
+    }
     if (scheduledDate !== undefined) {
       updateFields.push('scheduled_date = ?');
       updateValues.push(scheduledDate);
@@ -369,7 +449,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // Add measurement (initial or final)
 router.post('/:id/measurements', authenticateToken, async (req, res) => {
   try {
-    const { measurementType, temperature, pressure, voltage, current, resistance, otherMeasurements, notes } = req.body;
+    const { measurementType, temperature, pressure, voltage, current, resistance, otherMeasurements, notes, housingMeasurements } = req.body;
     
     if (!measurementType || !['initial', 'final'].includes(measurementType)) {
       return res.status(400).json({ error: 'Valid measurement type (initial/final) is required' });
@@ -404,6 +484,37 @@ router.post('/:id/measurements', authenticateToken, async (req, res) => {
         req.user.id
       ]
     );
+
+    // Insert housing measurements if provided (new feature)
+    if (Array.isArray(housingMeasurements) && housingMeasurements.length > 0) {
+      const values = housingMeasurements.map((hm) => ([
+        result.insertId,
+        hm.housingId || hm.housing_id,
+        hm.x1 !== undefined && hm.x1 !== null && hm.x1 !== '' ? hm.x1 : null,
+        hm.y1 !== undefined && hm.y1 !== null && hm.y1 !== '' ? hm.y1 : null,
+        hm.unit || null
+      ]));
+
+      // Validate housing ids exist for this work order
+      const housingIds = [...new Set(values.map(v => v[1]).filter(Boolean))];
+      if (housingIds.length > 0) {
+        const [existing] = await pool.query(
+          `SELECT id FROM work_order_housings WHERE work_order_id = ? AND id IN (?)`,
+          [req.params.id, housingIds]
+        );
+        const existingSet = new Set(existing.map(r => r.id));
+        const invalid = housingIds.filter(id => !existingSet.has(id));
+        if (invalid.length > 0) {
+          return res.status(400).json({ error: 'Alojamientos inválidos para esta orden' });
+        }
+      }
+
+      await pool.query(
+        `INSERT INTO work_order_housing_measurements (measurement_id, housing_id, x1, y1, unit)
+         VALUES ?`,
+        [values]
+      );
+    }
     
     await logActivity(req.user.id, 'CREATE', 'measurement', result.insertId, `Added ${measurementType} measurement`, req.ip);
     

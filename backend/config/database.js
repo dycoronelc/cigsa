@@ -136,6 +136,88 @@ export const initDatabase = async () => {
       }
     }
 
+    // Add service_location column to work_orders if it doesn't exist
+    try {
+      const dbName = process.env.DB_NAME || 'cigsa_db';
+      const [cols] = await pool.query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = 'work_orders'
+        AND COLUMN_NAME = 'service_location'
+      `, [dbName]);
+
+      if (cols.length === 0) {
+        await pool.query('ALTER TABLE work_orders ADD COLUMN service_location VARCHAR(100) NULL AFTER service_id');
+        console.log('Added service_location column to work_orders table');
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error adding service_location column:', error.message);
+      }
+    }
+
+    // Add service_housing_count column to work_orders if it doesn't exist
+    try {
+      const dbName = process.env.DB_NAME || 'cigsa_db';
+      const [cols] = await pool.query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = 'work_orders'
+        AND COLUMN_NAME = 'service_housing_count'
+      `, [dbName]);
+
+      if (cols.length === 0) {
+        await pool.query('ALTER TABLE work_orders ADD COLUMN service_housing_count INT DEFAULT 0 AFTER service_location');
+        console.log('Added service_housing_count column to work_orders table');
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error adding service_housing_count column:', error.message);
+      }
+    }
+
+    // Ensure work_order_housings table exists
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS work_order_housings (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          work_order_id INT NOT NULL,
+          measure_code VARCHAR(10) NOT NULL,
+          description TEXT,
+          nominal_value DECIMAL(10, 3),
+          nominal_unit VARCHAR(20),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
+          UNIQUE KEY unique_work_order_measure_code (work_order_id, measure_code)
+        )
+      `);
+    } catch (error) {
+      console.error('Error ensuring work_order_housings table:', error.sqlMessage || error.message);
+    }
+
+    // Ensure work_order_housing_measurements table exists
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS work_order_housing_measurements (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          measurement_id INT NOT NULL,
+          housing_id INT NOT NULL,
+          x1 DECIMAL(10, 3),
+          y1 DECIMAL(10, 3),
+          unit VARCHAR(20),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (measurement_id) REFERENCES measurements(id) ON DELETE CASCADE,
+          FOREIGN KEY (housing_id) REFERENCES work_order_housings(id) ON DELETE CASCADE,
+          UNIQUE KEY unique_measurement_housing (measurement_id, housing_id)
+        )
+      `);
+    } catch (error) {
+      console.error('Error ensuring work_order_housing_measurements table:', error.sqlMessage || error.message);
+    }
+
     // Add financial fields to services table if they don't exist
     try {
       const [costPriceCol] = await pool.query(`
@@ -157,6 +239,22 @@ export const initDatabase = async () => {
       if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
         console.error('Error adding financial fields to services:', error.message);
       }
+    }
+
+    // Ensure service_categories table exists (for older databases / partial setups)
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS service_categories (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          name VARCHAR(100) UNIQUE NOT NULL,
+          description TEXT,
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+      `);
+    } catch (error) {
+      console.error('Error ensuring service_categories table:', error.sqlMessage || error.message);
     }
 
     // Add category_id column + FK to services table if it doesn't exist

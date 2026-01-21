@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../services/api';
+import { ViewIcon } from '../../components/Icons';
 import './WorkOrders.css';
 
 export default function WorkOrders() {
@@ -118,10 +119,10 @@ export default function WorkOrders() {
                     <div className="action-buttons">
                       <Link
                         to={`/admin/work-orders/${order.id}`}
-                        className="btn-link"
+                        className="action-btn action-btn-view"
                         title="Ver detalles"
                       >
-                        Ver
+                        <ViewIcon size={16} />
                       </Link>
                     </div>
                   </td>

@@ -10,16 +10,49 @@ export default function WorkOrderNew() {
   const [equipment, setEquipment] = useState([]);
   const [services, setServices] = useState([]);
   const [technicians, setTechnicians] = useState([]);
+  const [showHousingsModal, setShowHousingsModal] = useState(false);
+  const [serviceHousings, setServiceHousings] = useState([]);
   const [formData, setFormData] = useState({
     clientId: '',
     equipmentId: '',
     serviceId: '',
+    serviceLocation: '',
+    serviceHousingCount: '',
     title: '',
     description: '',
     priority: 'medium',
     scheduledDate: '',
     assignedTechnicianId: ''
   });
+
+  const numberToLetters = (n) => {
+    // 1 -> A, 2 -> B, ... 26 -> Z, 27 -> AA
+    let num = n;
+    let s = '';
+    while (num > 0) {
+      const mod = (num - 1) % 26;
+      s = String.fromCharCode(65 + mod) + s;
+      num = Math.floor((num - 1) / 26);
+    }
+    return s;
+  };
+
+  const openHousingsModalForCount = (count) => {
+    const c = Number(count);
+    if (!Number.isFinite(c) || c <= 0) {
+      setServiceHousings([]);
+      setShowHousingsModal(false);
+      return;
+    }
+    const next = Array.from({ length: c }).map((_, idx) => ({
+      measureCode: numberToLetters(idx + 1),
+      description: '',
+      nominalValue: '',
+      nominalUnit: ''
+    }));
+    setServiceHousings(next);
+    setShowHousingsModal(true);
+  };
 
   useEffect(() => {
     fetchData();
@@ -62,10 +95,32 @@ export default function WorkOrderNew() {
     setLoading(true);
 
     try {
+      const count = formData.serviceHousingCount ? parseInt(formData.serviceHousingCount) : 0;
+      if (count > 0) {
+        if (!serviceHousings || serviceHousings.length !== count) {
+          alert('Debe completar la información de los alojamientos antes de crear la orden.');
+          setLoading(false);
+          return;
+        }
+        const hasMissing = serviceHousings.some(h => !h.measureCode || !h.description || h.nominalValue === '' || !h.nominalUnit);
+        if (hasMissing) {
+          alert('Complete Medida, Descripción, Medida Nominal y Unidad para cada alojamiento.');
+          setLoading(false);
+          return;
+        }
+      }
+
       const response = await api.post('/work-orders', {
         clientId: parseInt(formData.clientId),
         equipmentId: parseInt(formData.equipmentId),
         serviceId: formData.serviceId ? parseInt(formData.serviceId) : null,
+        serviceLocation: formData.serviceLocation || null,
+        serviceHousings: (parseInt(formData.serviceHousingCount) > 0) ? serviceHousings.map(h => ({
+          measureCode: h.measureCode,
+          description: h.description,
+          nominalValue: h.nominalValue !== '' ? parseFloat(h.nominalValue) : null,
+          nominalUnit: h.nominalUnit
+        })) : [],
         title: formData.title,
         description: formData.description,
         priority: formData.priority,
@@ -164,6 +219,47 @@ export default function WorkOrderNew() {
           </div>
 
           <div className="form-group">
+            <label htmlFor="serviceLocation">Ubicación del Servicio</label>
+            <input
+              type="text"
+              id="serviceLocation"
+              value={formData.serviceLocation}
+              onChange={(e) => setFormData({ ...formData, serviceLocation: e.target.value })}
+              placeholder="Ej: Planta 1, Área X, Taller, etc."
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="serviceHousingCount">Cantidad de Alojamientos a intervenir</label>
+            <input
+              type="number"
+              id="serviceHousingCount"
+              min="0"
+              value={formData.serviceHousingCount}
+              onChange={(e) => {
+                const v = e.target.value;
+                setFormData({ ...formData, serviceHousingCount: v });
+                if (v && parseInt(v) > 0) {
+                  openHousingsModalForCount(v);
+                } else {
+                  setServiceHousings([]);
+                }
+              }}
+              placeholder="0"
+            />
+            {parseInt(formData.serviceHousingCount) > 0 && (
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ marginTop: 8 }}
+                onClick={() => setShowHousingsModal(true)}
+              >
+                Configurar Alojamientos
+              </button>
+            )}
+          </div>
+
+          <div className="form-group">
             <label htmlFor="title">Título de la Orden *</label>
             <input
               type="text"
@@ -240,6 +336,93 @@ export default function WorkOrderNew() {
           </button>
         </div>
       </form>
+
+      {showHousingsModal && (
+        <div className="modal-overlay" onClick={() => setShowHousingsModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 750 }}>
+            <h2>Alojamientos del Servicio</h2>
+            <p style={{ marginTop: -8, color: '#6e6b7b' }}>
+              Complete la información de cada alojamiento. La “Medida” es automática (A, B, C...).
+            </p>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Medida</th>
+                    <th>Descripción</th>
+                    <th>Medida Nominal</th>
+                    <th>Unidad</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {serviceHousings.map((h, idx) => (
+                    <tr key={h.measureCode}>
+                      <td style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{h.measureCode}</td>
+                      <td>
+                        <input
+                          value={h.description}
+                          onChange={(e) => {
+                            const next = [...serviceHousings];
+                            next[idx] = { ...next[idx], description: e.target.value };
+                            setServiceHousings(next);
+                          }}
+                          placeholder="Descripción del alojamiento"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={h.nominalValue}
+                          onChange={(e) => {
+                            const next = [...serviceHousings];
+                            next[idx] = { ...next[idx], nominalValue: e.target.value };
+                            setServiceHousings(next);
+                          }}
+                          placeholder="0.000"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={h.nominalUnit}
+                          onChange={(e) => {
+                            const next = [...serviceHousings];
+                            next[idx] = { ...next[idx], nominalUnit: e.target.value };
+                            setServiceHousings(next);
+                          }}
+                          placeholder="mm, in, etc."
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setShowHousingsModal(false)}>Cerrar</button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  const count = parseInt(formData.serviceHousingCount) || 0;
+                  if (count > 0 && serviceHousings.length !== count) {
+                    alert('Cantidad de alojamientos no coincide.');
+                    return;
+                  }
+                  const hasMissing = serviceHousings.some(h => !h.measureCode || !h.description || h.nominalValue === '' || !h.nominalUnit);
+                  if (hasMissing) {
+                    alert('Complete Descripción, Medida Nominal y Unidad para cada alojamiento.');
+                    return;
+                  }
+                  setShowHousingsModal(false);
+                }}
+              >
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

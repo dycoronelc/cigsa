@@ -132,6 +132,11 @@ export default function WorkOrderDetail() {
               </div>
 
               <div className="info-item">
+                <label>Ubicación del Servicio</label>
+                <p>{order.service_location || 'No especificada'}</p>
+              </div>
+
+              <div className="info-item">
                 <label>Técnico Asignado</label>
                 <p>{order.technician_name || 'Sin asignar'}</p>
               </div>
@@ -200,13 +205,49 @@ export default function WorkOrderDetail() {
                     <div className="measurement-header">
                       <span>{new Date(measurement.measurement_date).toLocaleString('es-PA')}</span>
                     </div>
-                    <div className="measurement-values">
-                      {measurement.temperature && <div>Temperatura: {measurement.temperature}°C</div>}
-                      {measurement.pressure && <div>Presión: {measurement.pressure}</div>}
-                      {measurement.voltage && <div>Voltaje: {measurement.voltage}V</div>}
-                      {measurement.current && <div>Corriente: {measurement.current}A</div>}
-                      {measurement.resistance && <div>Resistencia: {measurement.resistance}Ω</div>}
-                    </div>
+
+                    {measurement.housing_measurements && measurement.housing_measurements.length > 0 ? (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>Medida</th>
+                              <th>Descripción</th>
+                              <th>Nominal</th>
+                              <th>X1</th>
+                              <th>Y1</th>
+                              <th>Unidad</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {measurement.housing_measurements.map((hm) => (
+                              <tr key={hm.housing_id}>
+                                <td>{hm.measure_code}</td>
+                                <td>{hm.housing_description || '-'}</td>
+                                <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
+                                <td>{hm.x1 ?? '-'}</td>
+                                <td>{hm.y1 ?? '-'}</td>
+                                <td>{hm.unit || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div style={{ marginTop: 8 }}>
+                          <strong>Observaciones:</strong> {measurement.notes || '-'}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="measurement-values">
+                        {measurement.temperature && <div>Temperatura: {measurement.temperature}°C</div>}
+                        {measurement.pressure && <div>Presión: {measurement.pressure}</div>}
+                        {measurement.voltage && <div>Voltaje: {measurement.voltage}V</div>}
+                        {measurement.current && <div>Corriente: {measurement.current}A</div>}
+                        {measurement.resistance && <div>Resistencia: {measurement.resistance}Ω</div>}
+                        <div style={{ marginTop: 8 }}>
+                          <strong>Observaciones:</strong> {measurement.notes || '-'}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -222,13 +263,49 @@ export default function WorkOrderDetail() {
                     <div className="measurement-header">
                       <span>{new Date(measurement.measurement_date).toLocaleString('es-PA')}</span>
                     </div>
-                    <div className="measurement-values">
-                      {measurement.temperature && <div>Temperatura: {measurement.temperature}°C</div>}
-                      {measurement.pressure && <div>Presión: {measurement.pressure}</div>}
-                      {measurement.voltage && <div>Voltaje: {measurement.voltage}V</div>}
-                      {measurement.current && <div>Corriente: {measurement.current}A</div>}
-                      {measurement.resistance && <div>Resistencia: {measurement.resistance}Ω</div>}
-                    </div>
+
+                    {measurement.housing_measurements && measurement.housing_measurements.length > 0 ? (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>Medida</th>
+                              <th>Descripción</th>
+                              <th>Nominal</th>
+                              <th>X1</th>
+                              <th>Y1</th>
+                              <th>Unidad</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {measurement.housing_measurements.map((hm) => (
+                              <tr key={hm.housing_id}>
+                                <td>{hm.measure_code}</td>
+                                <td>{hm.housing_description || '-'}</td>
+                                <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
+                                <td>{hm.x1 ?? '-'}</td>
+                                <td>{hm.y1 ?? '-'}</td>
+                                <td>{hm.unit || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div style={{ marginTop: 8 }}>
+                          <strong>Observaciones:</strong> {measurement.notes || '-'}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="measurement-values">
+                        {measurement.temperature && <div>Temperatura: {measurement.temperature}°C</div>}
+                        {measurement.pressure && <div>Presión: {measurement.pressure}</div>}
+                        {measurement.voltage && <div>Voltaje: {measurement.voltage}V</div>}
+                        {measurement.current && <div>Corriente: {measurement.current}A</div>}
+                        {measurement.resistance && <div>Resistencia: {measurement.resistance}Ω</div>}
+                        <div style={{ marginTop: 8 }}>
+                          <strong>Observaciones:</strong> {measurement.notes || '-'}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

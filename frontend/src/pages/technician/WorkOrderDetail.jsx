@@ -13,7 +13,7 @@ export default function TechnicianWorkOrderDetail() {
   const [showMeasurementModal, setShowMeasurementModal] = useState(false);
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [showObservationModal, setShowObservationModal] = useState(false);
-  const [measurementData, setMeasurementData] = useState({ measurementType: 'initial', temperature: '', pressure: '', voltage: '', current: '', resistance: '', notes: '' });
+  const [measurementData, setMeasurementData] = useState({ measurementType: 'initial', notes: '', housingMeasurements: [] });
   const [observationData, setObservationData] = useState({ observation: '', observationType: 'general' });
 
   useEffect(() => {
@@ -24,6 +24,16 @@ export default function TechnicianWorkOrderDetail() {
     try {
       const response = await api.get(`/work-orders/${id}`);
       setOrder(response.data);
+      const housings = response.data?.service_housings || [];
+      setMeasurementData((prev) => ({
+        ...prev,
+        housingMeasurements: housings.map((h) => ({
+          housingId: h.id,
+          x1: '',
+          y1: '',
+          unit: ''
+        }))
+      }));
     } catch (error) {
       console.error('Error fetching work order:', error);
     } finally {
@@ -45,7 +55,12 @@ export default function TechnicianWorkOrderDetail() {
     try {
       await api.post(`/work-orders/${id}/measurements`, measurementData);
       setShowMeasurementModal(false);
-      setMeasurementData({ measurementType: 'initial', temperature: '', pressure: '', voltage: '', current: '', resistance: '', notes: '' });
+      const housings = order?.service_housings || [];
+      setMeasurementData({
+        measurementType: 'initial',
+        notes: '',
+        housingMeasurements: housings.map((h) => ({ housingId: h.id, x1: '', y1: '', unit: '' }))
+      });
       fetchOrder();
     } catch (error) {
       alert('Error al guardar medición');
@@ -83,6 +98,7 @@ export default function TechnicianWorkOrderDetail() {
 
   const initialMeasurements = order.measurements?.filter(m => m.measurement_type === 'initial') || [];
   const finalMeasurements = order.measurements?.filter(m => m.measurement_type === 'final') || [];
+  const serviceHousings = order.service_housings || [];
 
   return (
     <div className="technician-order-detail">
@@ -139,6 +155,10 @@ export default function TechnicianWorkOrderDetail() {
               <p>{order.equipment_name}</p>
             </div>
             <div className="info-item">
+              <label>Ubicación del Servicio</label>
+              <p>{order.service_location || 'No especificada'}</p>
+            </div>
+            <div className="info-item">
               <label>Descripción</label>
               <p>{order.description || 'Sin descripción'}</p>
             </div>
@@ -157,13 +177,54 @@ export default function TechnicianWorkOrderDetail() {
             {initialMeasurements.length > 0 ? (
               initialMeasurements.map(m => (
                 <div key={m.id} className="measurement-card">
-                  <div className="measurement-values">
-                    {m.temperature && <div>T: {m.temperature}°C</div>}
-                    {m.pressure && <div>P: {m.pressure}</div>}
-                    {m.voltage && <div>V: {m.voltage}V</div>}
-                    {m.current && <div>I: {m.current}A</div>}
-                    {m.resistance && <div>R: {m.resistance}Ω</div>}
-                  </div>
+                  {m.housing_measurements && m.housing_measurements.length > 0 ? (
+                    <>
+                      <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                        {new Date(m.measurement_date).toLocaleString('es-PA')}
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>Medida</th>
+                              <th>Descripción</th>
+                              <th>Nominal</th>
+                              <th>X1</th>
+                              <th>Y1</th>
+                              <th>Unidad</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {m.housing_measurements.map((hm) => (
+                              <tr key={hm.housing_id}>
+                                <td>{hm.measure_code}</td>
+                                <td>{hm.housing_description || '-'}</td>
+                                <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
+                                <td>{hm.x1 ?? '-'}</td>
+                                <td>{hm.y1 ?? '-'}</td>
+                                <td>{hm.unit || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <strong>Observaciones:</strong> {m.notes || '-'}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="measurement-values">
+                      {/* compatibilidad con mediciones antiguas */}
+                      {m.temperature && <div>T: {m.temperature}°C</div>}
+                      {m.pressure && <div>P: {m.pressure}</div>}
+                      {m.voltage && <div>V: {m.voltage}V</div>}
+                      {m.current && <div>I: {m.current}A</div>}
+                      {m.resistance && <div>R: {m.resistance}Ω</div>}
+                      <div style={{ marginTop: 8 }}>
+                        <strong>Observaciones:</strong> {m.notes || '-'}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             ) : (
@@ -174,13 +235,54 @@ export default function TechnicianWorkOrderDetail() {
             {finalMeasurements.length > 0 ? (
               finalMeasurements.map(m => (
                 <div key={m.id} className="measurement-card">
-                  <div className="measurement-values">
-                    {m.temperature && <div>T: {m.temperature}°C</div>}
-                    {m.pressure && <div>P: {m.pressure}</div>}
-                    {m.voltage && <div>V: {m.voltage}V</div>}
-                    {m.current && <div>I: {m.current}A</div>}
-                    {m.resistance && <div>R: {m.resistance}Ω</div>}
-                  </div>
+                  {m.housing_measurements && m.housing_measurements.length > 0 ? (
+                    <>
+                      <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                        {new Date(m.measurement_date).toLocaleString('es-PA')}
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>Medida</th>
+                              <th>Descripción</th>
+                              <th>Nominal</th>
+                              <th>X1</th>
+                              <th>Y1</th>
+                              <th>Unidad</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {m.housing_measurements.map((hm) => (
+                              <tr key={hm.housing_id}>
+                                <td>{hm.measure_code}</td>
+                                <td>{hm.housing_description || '-'}</td>
+                                <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
+                                <td>{hm.x1 ?? '-'}</td>
+                                <td>{hm.y1 ?? '-'}</td>
+                                <td>{hm.unit || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <strong>Observaciones:</strong> {m.notes || '-'}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="measurement-values">
+                      {/* compatibilidad con mediciones antiguas */}
+                      {m.temperature && <div>T: {m.temperature}°C</div>}
+                      {m.pressure && <div>P: {m.pressure}</div>}
+                      {m.voltage && <div>V: {m.voltage}V</div>}
+                      {m.current && <div>I: {m.current}A</div>}
+                      {m.resistance && <div>R: {m.resistance}Ω</div>}
+                      <div style={{ marginTop: 8 }}>
+                        <strong>Observaciones:</strong> {m.notes || '-'}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             ) : (
@@ -297,12 +399,77 @@ export default function TechnicianWorkOrderDetail() {
                 <option value="initial">Medición Inicial</option>
                 <option value="final">Medición Final</option>
               </select>
-              <input type="number" placeholder="Temperatura (°C)" value={measurementData.temperature} onChange={(e) => setMeasurementData({...measurementData, temperature: e.target.value})} />
-              <input type="number" placeholder="Presión" value={measurementData.pressure} onChange={(e) => setMeasurementData({...measurementData, pressure: e.target.value})} />
-              <input type="number" placeholder="Voltaje (V)" value={measurementData.voltage} onChange={(e) => setMeasurementData({...measurementData, voltage: e.target.value})} />
-              <input type="number" placeholder="Corriente (A)" value={measurementData.current} onChange={(e) => setMeasurementData({...measurementData, current: e.target.value})} />
-              <input type="number" placeholder="Resistencia (Ω)" value={measurementData.resistance} onChange={(e) => setMeasurementData({...measurementData, resistance: e.target.value})} />
-              <textarea placeholder="Notas" value={measurementData.notes} onChange={(e) => setMeasurementData({...measurementData, notes: e.target.value})} />
+
+              {serviceHousings && serviceHousings.length > 0 ? (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Medida</th>
+                        <th>Descripción</th>
+                        <th>Nominal</th>
+                        <th>X1</th>
+                        <th>Y1</th>
+                        <th>Unidad</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {serviceHousings.map((h, idx) => {
+                        const row = measurementData.housingMeasurements?.find(r => r.housingId === h.id) || { housingId: h.id, x1: '', y1: '', unit: '' };
+                        return (
+                          <tr key={h.id}>
+                            <td style={{ fontWeight: 700 }}>{h.measure_code}</td>
+                            <td>{h.description || '-'}</td>
+                            <td>{h.nominal_value !== null && h.nominal_value !== undefined ? `${h.nominal_value} ${h.nominal_unit || ''}` : '-'}</td>
+                            <td>
+                              <input
+                                type="number"
+                                step="0.001"
+                                value={row.x1}
+                                onChange={(e) => {
+                                  const next = measurementData.housingMeasurements.map(r => r.housingId === h.id ? { ...r, x1: e.target.value } : r);
+                                  setMeasurementData({ ...measurementData, housingMeasurements: next });
+                                }}
+                                placeholder="0.000"
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                step="0.001"
+                                value={row.y1}
+                                onChange={(e) => {
+                                  const next = measurementData.housingMeasurements.map(r => r.housingId === h.id ? { ...r, y1: e.target.value } : r);
+                                  setMeasurementData({ ...measurementData, housingMeasurements: next });
+                                }}
+                                placeholder="0.000"
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={row.unit}
+                                onChange={(e) => {
+                                  const next = measurementData.housingMeasurements.map(r => r.housingId === h.id ? { ...r, unit: e.target.value } : r);
+                                  setMeasurementData({ ...measurementData, housingMeasurements: next });
+                                }}
+                                placeholder="mm, in, etc."
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty-message">Esta orden no tiene alojamientos configurados.</p>
+              )}
+
+              <textarea
+                placeholder="Observaciones"
+                value={measurementData.notes}
+                onChange={(e) => setMeasurementData({ ...measurementData, notes: e.target.value })}
+              />
               <div className="modal-actions">
                 <button type="button" onClick={() => setShowMeasurementModal(false)}>Cancelar</button>
                 <button type="submit" className="btn-primary">Guardar</button>

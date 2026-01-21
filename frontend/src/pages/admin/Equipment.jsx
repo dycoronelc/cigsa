@@ -35,7 +35,6 @@ export default function Equipment() {
     housingId: '',
     serialNumber: '', 
     clientId: '', 
-    location: '', 
     description: '' 
   });
   const [editingEquipment, setEditingEquipment] = useState(null);
@@ -49,7 +48,6 @@ export default function Equipment() {
   const [documentFormData, setDocumentFormData] = useState({
     brandId: '',
     modelId: '',
-    housingId: '',
     documentType: 'manual',
     description: ''
   });
@@ -253,7 +251,6 @@ export default function Equipment() {
       formData.append('document', documentFile);
       formData.append('brandId', documentFormData.brandId || '');
       formData.append('modelId', documentFormData.modelId || '');
-      formData.append('housingId', documentFormData.housingId || '');
       formData.append('documentType', documentFormData.documentType);
       formData.append('description', documentFormData.description || '');
 
@@ -262,7 +259,7 @@ export default function Equipment() {
       });
       
       setShowDocumentModal(false);
-      setDocumentFormData({ brandId: '', modelId: '', housingId: '', documentType: 'manual', description: '' });
+      setDocumentFormData({ brandId: '', modelId: '', documentType: 'manual', description: '' });
       setDocumentFile(null);
       fetchEquipmentDocuments();
     } catch (error) {
@@ -289,7 +286,6 @@ export default function Equipment() {
         housingId: equipmentFormData.housingId ? parseInt(equipmentFormData.housingId) : null,
         serialNumber: equipmentFormData.serialNumber,
         clientId: equipmentFormData.clientId ? parseInt(equipmentFormData.clientId) : null,
-        location: equipmentFormData.location || null,
         description: equipmentFormData.description || null
       };
       if (editingEquipment) {
@@ -298,7 +294,7 @@ export default function Equipment() {
         await api.post('/equipment', payload);
       }
       setShowEquipmentModal(false);
-      setEquipmentFormData({ modelId: '', serialNumber: '', clientId: '', location: '', description: '' });
+      setEquipmentFormData({ modelId: '', housingId: '', serialNumber: '', clientId: '', description: '' });
       setEditingEquipment(null);
       setEquipmentModalBrandId('');
       fetchEquipment();
@@ -318,14 +314,14 @@ export default function Equipment() {
       }
       setEquipmentFormData({
         modelId: equipment.model_id,
+        housingId: equipment.housing_id || '',
         serialNumber: equipment.serial_number,
         clientId: equipment.client_id || '',
-        location: equipment.location || '',
         description: equipment.description || ''
       });
       setEditingEquipment(equipment);
     } else {
-      setEquipmentFormData({ modelId: '', serialNumber: '', clientId: '', location: '', description: '' });
+      setEquipmentFormData({ modelId: '', housingId: '', serialNumber: '', clientId: '', description: '' });
       setEditingEquipment(null);
       setEquipmentModalBrandId('');
     }
@@ -556,7 +552,6 @@ export default function Equipment() {
                   <th>Modelo</th>
                   <th>Componentes</th>
                   <th>Cliente</th>
-                  <th>Ubicación</th>
                 </tr>
               </thead>
               <tbody>
@@ -593,7 +588,6 @@ export default function Equipment() {
                     <td>{item.model_name}</td>
                     <td>{item.components || '-'}</td>
                     <td>{item.client_name || <span className="badge badge-gray">Sin asignar</span>}</td>
-                    <td>{item.location || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -682,7 +676,7 @@ export default function Equipment() {
           <div className="table-header">
             <div className="table-header-actions">
               <button onClick={() => {
-                setDocumentFormData({ brandId: '', modelId: '', housingId: '', documentType: 'manual', description: '' });
+                setDocumentFormData({ brandId: '', modelId: '', documentType: 'manual', description: '' });
                 setDocumentFile(null);
                 setShowDocumentModal(true);
               }} className="btn-primary">+ Subir Documento</button>
@@ -853,11 +847,6 @@ export default function Equipment() {
                 <option value="">Sin asignar cliente</option>
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <input 
-                placeholder="Ubicación" 
-                value={equipmentFormData.location} 
-                onChange={(e) => setEquipmentFormData({...equipmentFormData, location: e.target.value})} 
-              />
               <textarea 
                 placeholder="Descripción" 
                 value={equipmentFormData.description} 
@@ -923,7 +912,7 @@ export default function Equipment() {
                 <label>Marca (Opcional)</label>
                 <select 
                   value={documentFormData.brandId} 
-                  onChange={(e) => setDocumentFormData({...documentFormData, brandId: e.target.value, modelId: '', housingId: ''})}
+                  onChange={(e) => setDocumentFormData({...documentFormData, brandId: e.target.value, modelId: ''})}
                 >
                   <option value="">Seleccionar Marca</option>
                   {brands.map(brand => (
@@ -935,25 +924,12 @@ export default function Equipment() {
                 <label>Modelo (Opcional)</label>
                 <select 
                   value={documentFormData.modelId} 
-                  onChange={(e) => setDocumentFormData({...documentFormData, modelId: e.target.value, housingId: ''})}
+                  onChange={(e) => setDocumentFormData({...documentFormData, modelId: e.target.value})}
                   disabled={!documentFormData.brandId}
                 >
                   <option value="">Seleccionar Modelo</option>
                   {models.filter(m => m.brand_id === parseInt(documentFormData.brandId)).map(model => (
                     <option key={model.id} value={model.id}>{model.model_name}</option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ marginBottom: '15px' }}>
-                <label>Alojamiento (Opcional)</label>
-                <select 
-                  value={documentFormData.housingId} 
-                  onChange={(e) => setDocumentFormData({...documentFormData, housingId: e.target.value})}
-                  disabled={!documentFormData.modelId}
-                >
-                  <option value="">Seleccionar Alojamiento</option>
-                  {housings.filter(h => h.model_id === parseInt(documentFormData.modelId)).map(housing => (
-                    <option key={housing.id} value={housing.id}>{housing.housing_name}</option>
                   ))}
                 </select>
               </div>

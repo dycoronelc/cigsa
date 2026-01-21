@@ -157,7 +157,8 @@ apt install -y git
 
 ```bash
 # Conectarse a MySQL
-mysql -u root -p
+.
+
 
 # Dentro de MySQL, ejecutar:
 CREATE DATABASE cigsa_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

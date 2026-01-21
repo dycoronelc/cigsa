@@ -300,7 +300,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create equipment
 router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'equipment'), async (req, res) => {
   try {
-    const { modelId, housingId, serialNumber, clientId, location, description } = req.body;
+    const { modelId, housingId, serialNumber, clientId, description } = req.body;
 
     if (!modelId || !serialNumber) {
       return res.status(400).json({ error: 'Model ID and serial number are required' });
@@ -329,8 +329,8 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
     }
 
     const [result] = await pool.query(
-      'INSERT INTO equipment (model_id, housing_id, serial_number, client_id, location, description) VALUES (?, ?, ?, ?, ?, ?)',
-      [modelId, housingId || null, serialNumber, clientId || null, location || null, description || null]
+      'INSERT INTO equipment (model_id, housing_id, serial_number, client_id, description) VALUES (?, ?, ?, ?, ?)',
+      [modelId, housingId || null, serialNumber, clientId || null, description || null]
     );
 
     res.status(201).json({ id: result.insertId, message: 'Equipment created successfully' });
@@ -346,7 +346,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
 // Update equipment
 router.put('/:id', authenticateToken, requireRole('admin'), activityLogger('UPDATE', 'equipment'), async (req, res) => {
   try {
-    const { modelId, housingId, serialNumber, clientId, location, description, isActive } = req.body;
+    const { modelId, housingId, serialNumber, clientId, description, isActive } = req.body;
     const pool = await getConnection();
 
     const updateFields = [];
@@ -384,10 +384,6 @@ router.put('/:id', authenticateToken, requireRole('admin'), activityLogger('UPDA
     if (clientId !== undefined) {
       updateFields.push('client_id = ?');
       updateValues.push(clientId || null);
-    }
-    if (location !== undefined) {
-      updateFields.push('location = ?');
-      updateValues.push(location);
     }
     if (description !== undefined) {
       updateFields.push('description = ?');

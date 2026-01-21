@@ -100,7 +100,6 @@ CREATE TABLE IF NOT EXISTS equipment (
   housing_id INT,
   serial_number VARCHAR(50) NOT NULL,
   client_id INT,
-  location VARCHAR(100),
   description TEXT,
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -118,6 +117,8 @@ CREATE TABLE IF NOT EXISTS work_orders (
   client_id INT NOT NULL,
   equipment_id INT NOT NULL,
   service_id INT,
+  service_location VARCHAR(100),
+  service_housing_count INT DEFAULT 0,
   assigned_technician_id INT,
   title VARCHAR(200) NOT NULL,
   description TEXT,
@@ -134,6 +135,34 @@ CREATE TABLE IF NOT EXISTS work_orders (
   FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Work Order Service Housings (Alojamientos intervenidos en la OT)
+CREATE TABLE IF NOT EXISTS work_order_housings (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  work_order_id INT NOT NULL,
+  measure_code VARCHAR(10) NOT NULL COMMENT 'Correlativo tipo A, B, C... por OT',
+  description TEXT,
+  nominal_value DECIMAL(10, 3),
+  nominal_unit VARCHAR(20),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_work_order_measure_code (work_order_id, measure_code)
+);
+
+-- Measurements per housing (X1/Y1 + unidad) linked to a measurement event (initial/final)
+CREATE TABLE IF NOT EXISTS work_order_housing_measurements (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  measurement_id INT NOT NULL,
+  housing_id INT NOT NULL,
+  x1 DECIMAL(10, 3),
+  y1 DECIMAL(10, 3),
+  unit VARCHAR(20),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (measurement_id) REFERENCES measurements(id) ON DELETE CASCADE,
+  FOREIGN KEY (housing_id) REFERENCES work_order_housings(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_measurement_housing (measurement_id, housing_id)
 );
 
 -- Measurements table (initial and final measurements)
@@ -253,6 +282,7 @@ CREATE INDEX idx_work_orders_technician ON work_orders(assigned_technician_id);
 CREATE INDEX idx_work_orders_client ON work_orders(client_id);
 CREATE INDEX idx_work_orders_equipment ON work_orders(equipment_id);
 CREATE INDEX idx_work_orders_service ON work_orders(service_id);
+CREATE INDEX idx_work_orders_service_housing_count ON work_orders(service_housing_count);
 CREATE INDEX idx_equipment_client ON equipment(client_id);
 CREATE INDEX idx_equipment_model ON equipment(model_id);
 CREATE INDEX idx_equipment_serial ON equipment(serial_number);
