@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "init-db": "node scripts/init-database.js",
     "create-admin": "node scripts/create-admin.js",
     "migrate-equipment": "node scripts/migrate-equipment-schema.js",
     "import-equipment": "node scripts/import-equipment-from-excel.js",

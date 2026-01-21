@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../../services/api';
+import { getStaticUrl } from '../../config.js';
 import { EditIcon, DeleteIcon, SearchIcon } from '../../components/Icons';
 import './Management.css';
 
@@ -707,7 +708,7 @@ export default function Equipment() {
                   <tr key={doc.id}>
                     <td>
                       <div className="action-buttons">
-                        <a href={`http://localhost:3001${doc.file_path}`} target="_blank" rel="noopener noreferrer" className="action-btn action-btn-view" title="Ver">
+                        <a href={getStaticUrl(doc.file_path)} target="_blank" rel="noopener noreferrer" className="action-btn action-btn-view" title="Ver">
                           👁️
                         </a>
                         <button onClick={() => handleDeleteDocument(doc.id)} className="action-btn action-btn-delete" title="Eliminar">

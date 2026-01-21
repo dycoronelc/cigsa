@@ -7,7 +7,17 @@ export default function Clients() {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ name: '', companyName: '', email: '', phone: '', address: '', contactPerson: '' });
+  const [modalMode, setModalMode] = useState('create'); // 'create' | 'edit'
+  const [editingClientId, setEditingClientId] = useState(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    companyName: '',
+    email: '',
+    phone: '',
+    address: '',
+    contactPerson: '',
+    isActive: true
+  });
   const [filter, setFilter] = useState('');
 
   useEffect(() => {
@@ -28,13 +38,72 @@ export default function Clients() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/clients', formData);
+      if (modalMode === 'edit' && editingClientId) {
+        await api.put(`/clients/${editingClientId}`, {
+          name: formData.name,
+          companyName: formData.companyName,
+          email: formData.email,
+          phone: formData.phone,
+          address: formData.address,
+          contactPerson: formData.contactPerson,
+          isActive: formData.isActive
+        });
+      } else {
+        await api.post('/clients', {
+          name: formData.name,
+          companyName: formData.companyName,
+          email: formData.email,
+          phone: formData.phone,
+          address: formData.address,
+          contactPerson: formData.contactPerson
+        });
+      }
       setShowModal(false);
-      setFormData({ name: '', companyName: '', email: '', phone: '', address: '', contactPerson: '' });
+      setModalMode('create');
+      setEditingClientId(null);
+      setFormData({
+        name: '',
+        companyName: '',
+        email: '',
+        phone: '',
+        address: '',
+        contactPerson: '',
+        isActive: true
+      });
       fetchClients();
     } catch (error) {
-      alert('Error al crear cliente');
+      alert(error.response?.data?.error || 'Error al guardar cliente');
     }
+  };
+
+  const openCreateModal = () => {
+    setModalMode('create');
+    setEditingClientId(null);
+    setFormData({
+      name: '',
+      companyName: '',
+      email: '',
+      phone: '',
+      address: '',
+      contactPerson: '',
+      isActive: true
+    });
+    setShowModal(true);
+  };
+
+  const openEditModal = (client) => {
+    setModalMode('edit');
+    setEditingClientId(client.id);
+    setFormData({
+      name: client.name || '',
+      companyName: client.company_name || '',
+      email: client.email || '',
+      phone: client.phone || '',
+      address: client.address || '',
+      contactPerson: client.contact_person || '',
+      isActive: client.is_active !== undefined ? !!client.is_active : true
+    });
+    setShowModal(true);
   };
 
   if (loading) return <div className="loading">Cargando...</div>;
@@ -58,14 +127,14 @@ export default function Clients() {
           </div>
         </div>
         <div className="table-header-actions">
-          <button onClick={() => setShowModal(true)} className="btn-primary">+ Nuevo Cliente</button>
+          <button onClick={openCreateModal} className="btn-primary">+ Nuevo Cliente</button>
         </div>
       </div>
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>Nuevo Cliente</h2>
+            <h2>{modalMode === 'edit' ? 'Editar Cliente' : 'Nuevo Cliente'}</h2>
             <form onSubmit={handleSubmit}>
               <input placeholder="Nombre" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} required />
               <input placeholder="Empresa" value={formData.companyName} onChange={(e) => setFormData({...formData, companyName: e.target.value})} />
@@ -73,9 +142,21 @@ export default function Clients() {
               <input placeholder="Teléfono" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} />
               <textarea placeholder="Dirección" value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})} />
               <input placeholder="Persona de Contacto" value={formData.contactPerson} onChange={(e) => setFormData({...formData, contactPerson: e.target.value})} />
+              {modalMode === 'edit' && (
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!formData.isActive}
+                    onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                  />
+                  Activo
+                </label>
+              )}
               <div className="modal-actions">
                 <button type="button" onClick={() => setShowModal(false)}>Cancelar</button>
-                <button type="submit" className="btn-primary">Guardar</button>
+                <button type="submit" className="btn-primary">
+                  {modalMode === 'edit' ? 'Guardar Cambios' : 'Guardar'}
+                </button>
               </div>
             </form>
           </div>
@@ -107,7 +188,12 @@ export default function Clients() {
               <tr key={client.id}>
                 <td>
                   <div className="action-buttons">
-                    <button className="action-btn action-btn-edit" title="Editar">
+                    <button
+                      className="action-btn action-btn-edit"
+                      title="Editar"
+                      onClick={() => openEditModal(client)}
+                      type="button"
+                    >
                       <EditIcon size={16} />
                     </button>
                   </div>

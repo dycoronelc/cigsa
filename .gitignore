@@ -33,4 +33,3 @@ backend/uploads/documents/*
 # Database
 *.sql.backup
 *.db
-

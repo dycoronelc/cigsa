@@ -7,13 +7,14 @@ import './Management.css';
 export default function Services() {
   const navigate = useNavigate();
   const [services, setServices] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ 
     code: '', 
     name: '', 
     description: '', 
-    category: '', 
+    categoryId: '', 
     estimatedDuration: '', 
     standardPrice: '' 
   });
@@ -21,13 +22,17 @@ export default function Services() {
   const [categoryFilter, setCategoryFilter] = useState('');
 
   useEffect(() => {
-    fetchServices();
+    fetchServicesAndCategories();
   }, []);
 
-  const fetchServices = async () => {
+  const fetchServicesAndCategories = async () => {
     try {
-      const response = await api.get('/services');
-      setServices(response.data);
+      const [servicesRes, categoriesRes] = await Promise.all([
+        api.get('/services'),
+        api.get('/service-categories')
+      ]);
+      setServices(servicesRes.data);
+      setCategories(categoriesRes.data);
     } catch (error) {
       console.error('Error fetching services:', error);
     } finally {
@@ -35,11 +40,16 @@ export default function Services() {
     }
   };
 
+  const getServiceCategoryLabel = (service) => {
+    return service.category_name || service.category || '';
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
       const data = {
         ...formData,
+        categoryId: formData.categoryId ? parseInt(formData.categoryId) : null,
         estimatedDuration: formData.estimatedDuration ? parseInt(formData.estimatedDuration) : null,
         standardPrice: formData.standardPrice ? parseFloat(formData.standardPrice) : null
       };
@@ -47,8 +57,8 @@ export default function Services() {
       await api.post('/services', data);
       
       setShowModal(false);
-      setFormData({ code: '', name: '', description: '', category: '', estimatedDuration: '', standardPrice: '' });
-      fetchServices();
+      setFormData({ code: '', name: '', description: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
+      fetchServicesAndCategories();
     } catch (error) {
       alert(error.response?.data?.error || 'Error al guardar servicio');
     }
@@ -62,7 +72,7 @@ export default function Services() {
     if (window.confirm('¿Está seguro de desactivar este servicio?')) {
       try {
         await api.delete(`/services/${id}`);
-        fetchServices();
+        fetchServicesAndCategories();
       } catch (error) {
         alert('Error al desactivar servicio');
       }
@@ -71,7 +81,7 @@ export default function Services() {
 
   const handleCloseModal = () => {
     setShowModal(false);
-    setFormData({ code: '', name: '', description: '', category: '', estimatedDuration: '', standardPrice: '' });
+    setFormData({ code: '', name: '', description: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
   };
 
   if (loading) return <div className="loading">Cargando...</div>;
@@ -95,8 +105,8 @@ export default function Services() {
           </div>
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">Todas las categorías</option>
-            {[...new Set(services.map(s => s.category).filter(Boolean))].map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
+            {categories.map(cat => (
+              <option key={cat.id} value={cat.name}>{cat.name}</option>
             ))}
           </select>
         </div>
@@ -122,11 +132,15 @@ export default function Services() {
                 onChange={(e) => setFormData({...formData, name: e.target.value})} 
                 required 
               />
-              <input 
-                placeholder="Categoría (ej: Soldadura, Reparación)" 
-                value={formData.category} 
-                onChange={(e) => setFormData({...formData, category: e.target.value})} 
-              />
+              <select
+                value={formData.categoryId}
+                onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
+              >
+                <option value="">Seleccionar Categoría (Opcional)</option>
+                {categories.map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
+              </select>
               <input 
                 type="number" 
                 placeholder="Duración Estimada (horas)" 
@@ -172,7 +186,7 @@ export default function Services() {
           <tbody>
             {services
               .filter(service => {
-                if (categoryFilter && service.category !== categoryFilter) return false;
+                if (categoryFilter && getServiceCategoryLabel(service) !== categoryFilter) return false;
                 if (!filter) return true;
                 const search = filter.toLowerCase();
                 return service.code?.toLowerCase().includes(search) ||
@@ -200,7 +214,7 @@ export default function Services() {
                 </td>
                 <td>{service.code}</td>
                 <td>{service.name}</td>
-                <td>{service.category || '-'}</td>
+                <td>{getServiceCategoryLabel(service) || '-'}</td>
                 <td>{service.estimated_duration || '-'}</td>
                 <td>{service.standard_price ? `$${parseFloat(service.standard_price).toFixed(2)}` : '-'}</td>
               </tr>

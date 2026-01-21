@@ -52,7 +52,20 @@ export const initDatabase = async () => {
       .map(s => s.trim())
       .filter(s => s.length > 0 && !s.startsWith('--') && !s.startsWith('SET @'));
     
+    // Separate CREATE TABLE statements from CREATE INDEX statements
+    const createTableStatements = [];
+    const createIndexStatements = [];
+    
     for (const statement of statements) {
+      if (statement.toUpperCase().startsWith('CREATE INDEX')) {
+        createIndexStatements.push(statement);
+      } else {
+        createTableStatements.push(statement);
+      }
+    }
+    
+    // First, execute all CREATE TABLE statements
+    for (const statement of createTableStatements) {
       try {
         if (statement.length > 0) {
           await pool.query(statement);
@@ -75,6 +88,28 @@ export const initDatabase = async () => {
         // Log and re-throw other errors
         console.error('Schema execution error:', errorCode, errorMessage);
         throw error;
+      }
+    }
+    
+    // Then, execute all CREATE INDEX statements (after all tables exist)
+    for (const statement of createIndexStatements) {
+      try {
+        if (statement.length > 0) {
+          await pool.query(statement);
+        }
+      } catch (error) {
+        // Ignore errors for duplicate indexes
+        const errorCode = error.code || '';
+        const errorMessage = error.sqlMessage || error.message || '';
+        
+        if (errorCode === 'ER_DUP_KEYNAME' || 
+            errorMessage.includes('Duplicate key name') ||
+            errorMessage.includes('already exists')) {
+          // Silently skip - index already exists
+          continue;
+        }
+        // Log other errors but don't fail (indexes are optional)
+        console.warn('Index creation warning:', errorCode, errorMessage);
       }
     }
     
@@ -121,6 +156,59 @@ export const initDatabase = async () => {
       // Ignore if columns already exist
       if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
         console.error('Error adding financial fields to services:', error.message);
+      }
+    }
+
+    // Add category_id column + FK to services table if it doesn't exist
+    try {
+      const dbName = process.env.DB_NAME || 'cigsa_db';
+      const [categoryIdCol] = await pool.query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = 'services'
+        AND COLUMN_NAME = 'category_id'
+      `, [dbName]);
+
+      if (categoryIdCol.length === 0) {
+        await pool.query('ALTER TABLE services ADD COLUMN category_id INT NULL AFTER category');
+        console.log('Added category_id column to services table');
+      }
+
+      // Try to add FK if not present
+      const [fk] = await pool.query(`
+        SELECT CONSTRAINT_NAME
+        FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = 'services'
+        AND COLUMN_NAME = 'category_id'
+        AND REFERENCED_TABLE_NAME = 'service_categories'
+      `, [dbName]);
+
+      if (fk.length === 0) {
+        try {
+          await pool.query('ALTER TABLE services ADD CONSTRAINT services_ibfk_category FOREIGN KEY (category_id) REFERENCES service_categories(id) ON DELETE SET NULL');
+        } catch (error) {
+          const msg = error.sqlMessage || error.message || '';
+          if (!msg.includes('Duplicate foreign key') && !msg.includes('already exists')) {
+            console.warn('FK creation warning (services.category_id):', msg);
+          }
+        }
+      }
+
+      // Try to add index (safe to attempt)
+      try {
+        await pool.query('CREATE INDEX idx_services_category_id ON services(category_id)');
+      } catch (error) {
+        const msg = error.sqlMessage || error.message || '';
+        if (!msg.includes('Duplicate key name') && !msg.includes('already exists')) {
+          console.warn('Index creation warning (idx_services_category_id):', msg);
+        }
+      }
+    } catch (error) {
+      const msg = error.sqlMessage || error.message || '';
+      if (!msg.includes('Duplicate') && !msg.includes('already exists')) {
+        console.error('Error adding category_id to services:', msg);
       }
     }
 

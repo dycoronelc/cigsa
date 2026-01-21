@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { getStaticUrl } from '../../config.js';
 import './WorkOrderDetail.css';
 
 export default function WorkOrderDetail() {
@@ -243,7 +244,7 @@ export default function WorkOrderDetail() {
               <div className="photos-grid">
                 {order.photos.map(photo => (
                   <div key={photo.id} className="photo-item">
-                    <img src={`http://localhost:3001${photo.photo_path}`} alt={photo.description || 'Foto'} />
+                    <img src={getStaticUrl(photo.photo_path)} alt={photo.description || 'Foto'} />
                     <p>{photo.description || 'Sin descripción'}</p>
                   </div>
                 ))}
@@ -319,7 +320,7 @@ export default function WorkOrderDetail() {
                         </div>
                         <div className="document-info">
                           <a
-                            href={`http://localhost:3001${doc.file_path}`}
+                            href={getStaticUrl(doc.file_path)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="document-link"

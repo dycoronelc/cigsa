@@ -28,6 +28,16 @@ CREATE TABLE IF NOT EXISTS clients (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- Service Categories table (Maestro de categorías para servicios)
+CREATE TABLE IF NOT EXISTS service_categories (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(100) UNIQUE NOT NULL,
+  description TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- Services table (servicios del taller)
 CREATE TABLE IF NOT EXISTS services (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -35,6 +45,7 @@ CREATE TABLE IF NOT EXISTS services (
   name VARCHAR(100) NOT NULL,
   description TEXT,
   category VARCHAR(50),
+  category_id INT,
   estimated_duration INT COMMENT 'Duración estimada en horas',
   standard_price DECIMAL(10, 2),
   cost_price DECIMAL(10, 2) COMMENT 'Costo total del servicio',
@@ -42,7 +53,8 @@ CREATE TABLE IF NOT EXISTS services (
   material_cost DECIMAL(10, 2) COMMENT 'Costo de materiales',
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (category_id) REFERENCES service_categories(id) ON DELETE SET NULL
 );
 
 
@@ -245,6 +257,7 @@ CREATE INDEX idx_equipment_client ON equipment(client_id);
 CREATE INDEX idx_equipment_model ON equipment(model_id);
 CREATE INDEX idx_equipment_serial ON equipment(serial_number);
 CREATE INDEX idx_equipment_models_brand ON equipment_models(brand_id);
+CREATE INDEX idx_services_category_id ON services(category_id);
 CREATE INDEX idx_activity_log_user ON activity_log(user_id);
 CREATE INDEX idx_activity_log_created ON activity_log(created_at);
 

@@ -7,6 +7,7 @@ export default function ServiceDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [service, setService] = useState(null);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('general');
   const [isEditing, setIsEditing] = useState(false);
@@ -14,7 +15,7 @@ export default function ServiceDetail() {
     code: '',
     name: '',
     description: '',
-    category: '',
+    categoryId: '',
     estimatedDuration: '',
     standardPrice: '',
     costPrice: '',
@@ -24,7 +25,17 @@ export default function ServiceDetail() {
 
   useEffect(() => {
     fetchService();
+    fetchCategories();
   }, [id]);
+
+  const fetchCategories = async () => {
+    try {
+      const res = await api.get('/service-categories');
+      setCategories(res.data);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    }
+  };
 
   const fetchService = async () => {
     try {
@@ -35,7 +46,7 @@ export default function ServiceDetail() {
         code: serviceData.code || '',
         name: serviceData.name || '',
         description: serviceData.description || '',
-        category: serviceData.category || '',
+        categoryId: serviceData.category_id ? String(serviceData.category_id) : '',
         estimatedDuration: serviceData.estimated_duration || '',
         standardPrice: serviceData.standard_price || '',
         costPrice: serviceData.cost_price || '',
@@ -54,6 +65,7 @@ export default function ServiceDetail() {
     try {
       const data = {
         ...formData,
+        categoryId: formData.categoryId ? parseInt(formData.categoryId) : null,
         estimatedDuration: formData.estimatedDuration ? parseInt(formData.estimatedDuration) : null,
         standardPrice: formData.standardPrice ? parseFloat(formData.standardPrice) : null,
         costPrice: formData.costPrice ? parseFloat(formData.costPrice) : null,
@@ -78,7 +90,7 @@ export default function ServiceDetail() {
         code: service.code || '',
         name: service.name || '',
         description: service.description || '',
-        category: service.category || '',
+        categoryId: service.category_id ? String(service.category_id) : '',
         estimatedDuration: service.estimated_duration || '',
         standardPrice: service.standard_price || '',
         costPrice: service.cost_price || '',
@@ -121,6 +133,8 @@ export default function ServiceDetail() {
   const profitMargin = formData.standardPrice && formData.costPrice
     ? ((parseFloat(formData.standardPrice) - parseFloat(formData.costPrice)) / parseFloat(formData.standardPrice) * 100).toFixed(2)
     : null;
+
+  const categoryLabel = service.category_name || service.category || 'Sin categoría';
 
   return (
     <div className="service-detail">
@@ -187,13 +201,16 @@ export default function ServiceDetail() {
                 </div>
                 <div className="form-group">
                   <label>Categoría</label>
-                  <input
-                    type="text"
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  <select
+                    value={formData.categoryId}
+                    onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
                     className="form-input"
-                    placeholder="Ej: Soldadura, Reparación"
-                  />
+                  >
+                    <option value="">Sin categoría</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="form-group">
                   <label>Duración Estimada (horas)</label>
@@ -235,7 +252,7 @@ export default function ServiceDetail() {
                 </div>
                 <div className="info-item">
                   <label>Categoría</label>
-                  <p>{service.category || 'Sin categoría'}</p>
+                  <p>{categoryLabel}</p>
                 </div>
                 <div className="info-item">
                   <label>Duración Estimada</label>

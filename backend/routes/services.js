@@ -10,7 +10,15 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const pool = await getConnection();
     const [services] = await pool.query(
-      'SELECT * FROM services WHERE is_active = TRUE ORDER BY name'
+      `
+      SELECT 
+        s.*,
+        sc.name AS category_name
+      FROM services s
+      LEFT JOIN service_categories sc ON s.category_id = sc.id
+      WHERE s.is_active = TRUE
+      ORDER BY s.name
+      `
     );
     res.json(services);
   } catch (error) {
@@ -23,7 +31,17 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const pool = await getConnection();
-    const [services] = await pool.query('SELECT * FROM services WHERE id = ?', [req.params.id]);
+    const [services] = await pool.query(
+      `
+      SELECT 
+        s.*,
+        sc.name AS category_name
+      FROM services s
+      LEFT JOIN service_categories sc ON s.category_id = sc.id
+      WHERE s.id = ?
+      `,
+      [req.params.id]
+    );
 
     if (services.length === 0) {
       return res.status(404).json({ error: 'Service not found' });
@@ -83,7 +101,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create service
 router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'service'), async (req, res) => {
   try {
-    const { code, name, description, category, estimatedDuration, standardPrice } = req.body;
+    const { code, name, description, categoryId, category, estimatedDuration, standardPrice } = req.body;
 
     if (!code || !name) {
       return res.status(400).json({ error: 'Code and name are required' });
@@ -97,9 +115,27 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
       return res.status(400).json({ error: 'Service code already exists' });
     }
 
+    const normalizedCategoryId = categoryId !== undefined && categoryId !== null && categoryId !== '' ? parseInt(categoryId) : null;
+    const normalizedCategory = category !== undefined ? category : null;
+
     const [result] = await pool.query(
-      'INSERT INTO services (code, name, description, category, estimated_duration, standard_price) VALUES (?, ?, ?, ?, ?, ?)',
-      [code, name, description || null, category || null, estimatedDuration || null, standardPrice || null]
+      `
+      INSERT INTO services (
+        code, name, description,
+        category_id, category,
+        estimated_duration, standard_price
+      ) VALUES (?, ?, ?, ?, COALESCE(?, (SELECT name FROM service_categories WHERE id = ?)), ?, ?)
+      `,
+      [
+        code,
+        name,
+        description || null,
+        normalizedCategoryId,
+        normalizedCategory || null,
+        normalizedCategoryId,
+        estimatedDuration || null,
+        standardPrice || null
+      ]
     );
 
     res.status(201).json({ id: result.insertId, message: 'Service created successfully' });
@@ -112,7 +148,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
 // Update service
 router.put('/:id', authenticateToken, requireRole('admin'), activityLogger('UPDATE', 'service'), async (req, res) => {
   try {
-    const { code, name, description, category, estimatedDuration, standardPrice, costPrice, laborCost, materialCost, isActive } = req.body;
+    const { code, name, description, categoryId, category, estimatedDuration, standardPrice, costPrice, laborCost, materialCost, isActive } = req.body;
     const pool = await getConnection();
 
     const updateFields = [];
@@ -130,7 +166,21 @@ router.put('/:id', authenticateToken, requireRole('admin'), activityLogger('UPDA
       updateFields.push('description = ?');
       updateValues.push(description);
     }
-    if (category !== undefined) {
+    if (categoryId !== undefined) {
+      const normalizedCategoryId = categoryId !== null && categoryId !== '' ? parseInt(categoryId) : null;
+      updateFields.push('category_id = ?');
+      updateValues.push(normalizedCategoryId);
+
+      // Keep legacy text column in sync for display/backward compatibility
+      if (normalizedCategoryId === null) {
+        updateFields.push('category = ?');
+        updateValues.push(category !== undefined ? category : null);
+      } else {
+        updateFields.push('category = (SELECT name FROM service_categories WHERE id = ?)');
+        updateValues.push(normalizedCategoryId);
+      }
+    } else if (category !== undefined) {
+      // Backward compatibility: allow setting category text directly
       updateFields.push('category = ?');
       updateValues.push(category);
     }
