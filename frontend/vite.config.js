@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'robots.txt', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.png', 'cigsa.png', 'robots.txt'],
       manifest: {
         name: 'CIGSA - Gestión de Órdenes de Trabajo',
         short_name: 'CIGSA',
@@ -20,14 +20,16 @@ export default defineConfig({
         start_url: '/',
         icons: [
           {
-            src: '/icon-192x192.png',
-            sizes: '192x192',
-            type: 'image/png'
+            src: '/cigsa.png',
+            sizes: 'any',
+            type: 'image/png',
+            purpose: 'any maskable'
           },
           {
-            src: '/icon-512x512.png',
-            sizes: '512x512',
-            type: 'image/png'
+            src: '/favicon.png',
+            sizes: 'any',
+            type: 'image/png',
+            purpose: 'any maskable'
           }
         ]
       },
