@@ -60,6 +60,28 @@ export default function WorkOrderDetail() {
   const initialMeasurements = order.measurements?.filter(m => m.measurement_type === 'initial') || [];
   const finalMeasurements = order.measurements?.filter(m => m.measurement_type === 'final') || [];
 
+  // Calcular días trabajados
+  const calculateWorkingDays = () => {
+    if (!order.start_date) return null;
+    
+    const startDate = new Date(order.start_date);
+    let endDate;
+    
+    if (order.status === 'completed' && order.completion_date) {
+      endDate = new Date(order.completion_date);
+    } else {
+      endDate = new Date(); // Fecha actual
+    }
+    
+    // Calcular diferencia en milisegundos y convertir a días
+    const diffTime = Math.abs(endDate - startDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    return diffDays;
+  };
+
+  const workingDays = calculateWorkingDays();
+
   return (
     <div className="work-order-detail">
       <div className="detail-header">
@@ -185,6 +207,15 @@ export default function WorkOrderDetail() {
                   : 'No completada'}</p>
               </div>
 
+              {workingDays !== null && (
+                <div className="info-item">
+                  <label>Días Trabajados</label>
+                  <p style={{ fontWeight: 600, color: order.status === 'completed' ? '#4CAF50' : '#2196F3' }}>
+                    {workingDays} {workingDays === 1 ? 'día' : 'días'}
+                  </p>
+                </div>
+              )}
+
               <div className="info-item">
                 <label>Fecha de Creación</label>
                 <p>{new Date(order.created_at).toLocaleString('es-PA')}</p>
@@ -217,6 +248,7 @@ export default function WorkOrderDetail() {
                               <th>Medida</th>
                               <th>Descripción</th>
                               <th>Nominal</th>
+                              <th>Tolerancia</th>
                               <th>X1</th>
                               <th>Y1</th>
                               <th>Unidad</th>
@@ -228,6 +260,7 @@ export default function WorkOrderDetail() {
                                 <td>{hm.measure_code}</td>
                                 <td>{hm.housing_description || '-'}</td>
                                 <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
+                                <td>{hm.tolerance || '-'}</td>
                                 <td>{hm.x1 ?? '-'}</td>
                                 <td>{hm.y1 ?? '-'}</td>
                                 <td>{hm.unit || '-'}</td>
@@ -275,6 +308,7 @@ export default function WorkOrderDetail() {
                               <th>Medida</th>
                               <th>Descripción</th>
                               <th>Nominal</th>
+                              <th>Tolerancia</th>
                               <th>X1</th>
                               <th>Y1</th>
                               <th>Unidad</th>
@@ -286,6 +320,7 @@ export default function WorkOrderDetail() {
                                 <td>{hm.measure_code}</td>
                                 <td>{hm.housing_description || '-'}</td>
                                 <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
+                                <td>{hm.tolerance || '-'}</td>
                                 <td>{hm.x1 ?? '-'}</td>
                                 <td>{hm.y1 ?? '-'}</td>
                                 <td>{hm.unit || '-'}</td>

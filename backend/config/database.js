@@ -188,6 +188,7 @@ export const initDatabase = async () => {
           description TEXT,
           nominal_value DECIMAL(10, 3),
           nominal_unit VARCHAR(20),
+          tolerance VARCHAR(50) COMMENT 'Tolerancia permitida (ej: +0.5, -0.3, ±0.2)',
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
@@ -196,6 +197,26 @@ export const initDatabase = async () => {
       `);
     } catch (error) {
       console.error('Error ensuring work_order_housings table:', error.sqlMessage || error.message);
+    }
+
+    // Add tolerance column to work_order_housings if it doesn't exist
+    try {
+      const [toleranceCol] = await pool.query(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = ? 
+        AND TABLE_NAME = 'work_order_housings' 
+        AND COLUMN_NAME = 'tolerance'
+      `, [process.env.DB_NAME || 'cigsa_db']);
+      
+      if (toleranceCol.length === 0) {
+        await pool.query('ALTER TABLE work_order_housings ADD COLUMN tolerance VARCHAR(50) COMMENT "Tolerancia permitida (ej: +0.5, -0.3, ±0.2)"');
+        console.log('Added tolerance column to work_order_housings table');
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error adding tolerance column:', error.message);
+      }
     }
 
     // Ensure work_order_housing_measurements table exists

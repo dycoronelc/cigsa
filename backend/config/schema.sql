@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS work_order_housings (
   description TEXT,
   nominal_value DECIMAL(10, 3),
   nominal_unit VARCHAR(20),
+  tolerance VARCHAR(50) COMMENT 'Tolerancia permitida (ej: +0.5, -0.3, ±0.2)',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,

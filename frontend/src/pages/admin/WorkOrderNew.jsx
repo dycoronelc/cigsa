@@ -51,7 +51,8 @@ export default function WorkOrderNew() {
       measureCode: numberToLetters(idx + 1),
       description: '',
       nominalValue: '',
-      nominalUnit: ''
+      nominalUnit: '',
+      tolerance: ''
     }));
     setServiceHousings(next);
     setShowHousingsModal(true);
@@ -122,7 +123,8 @@ export default function WorkOrderNew() {
           measureCode: h.measureCode,
           description: h.description,
           nominalValue: h.nominalValue !== '' ? parseFloat(h.nominalValue) : null,
-          nominalUnit: h.nominalUnit
+          nominalUnit: h.nominalUnit,
+          tolerance: h.tolerance || null
         })) : [],
         title: formData.title,
         description: formData.description,
@@ -357,6 +359,7 @@ export default function WorkOrderNew() {
                     <th>Descripción</th>
                     <th>Medida Nominal</th>
                     <th>Unidad</th>
+                    <th>Tolerancia</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -396,6 +399,19 @@ export default function WorkOrderNew() {
                             setServiceHousings(next);
                           }}
                           placeholder="mm, in, etc."
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={h.tolerance}
+                          onChange={(e) => {
+                            const next = [...serviceHousings];
+                            next[idx] = { ...next[idx], tolerance: e.target.value };
+                            setServiceHousings(next);
+                          }}
+                          placeholder="+0.5, -0.3, ±0.2"
+                          pattern="[+\-±]?[0-9]*\.?[0-9]*"
                         />
                       </td>
                     </tr>

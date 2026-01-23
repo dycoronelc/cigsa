@@ -103,6 +103,28 @@ export default function TechnicianWorkOrderDetail() {
   const finalMeasurements = order.measurements?.filter(m => m.measurement_type === 'final') || [];
   const serviceHousings = order.service_housings || [];
 
+  // Calcular días trabajados
+  const calculateWorkingDays = () => {
+    if (!order.start_date) return null;
+    
+    const startDate = new Date(order.start_date);
+    let endDate;
+    
+    if (order.status === 'completed' && order.completion_date) {
+      endDate = new Date(order.completion_date);
+    } else {
+      endDate = new Date(); // Fecha actual
+    }
+    
+    // Calcular diferencia en milisegundos y convertir a días
+    const diffTime = Math.abs(endDate - startDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    return diffDays;
+  };
+
+  const workingDays = calculateWorkingDays();
+
   return (
     <div className="technician-order-detail">
       <div className="detail-header">
@@ -162,6 +184,26 @@ export default function TechnicianWorkOrderDetail() {
               <p>{order.service_location || 'No especificada'}</p>
             </div>
             <div className="info-item">
+              <label>Fecha de Inicio</label>
+              <p>{order.start_date 
+                ? new Date(order.start_date).toLocaleString('es-PA')
+                : 'No iniciada'}</p>
+            </div>
+            <div className="info-item">
+              <label>Fecha de Completación</label>
+              <p>{order.completion_date 
+                ? new Date(order.completion_date).toLocaleString('es-PA')
+                : 'No completada'}</p>
+            </div>
+            {workingDays !== null && (
+              <div className="info-item">
+                <label>Días Trabajados</label>
+                <p style={{ fontWeight: 600, color: order.status === 'completed' ? '#4CAF50' : '#2196F3' }}>
+                  {workingDays} {workingDays === 1 ? 'día' : 'días'}
+                </p>
+              </div>
+            )}
+            <div className="info-item">
               <label>Descripción</label>
               <p>{order.description || 'Sin descripción'}</p>
             </div>
@@ -189,25 +231,27 @@ export default function TechnicianWorkOrderDetail() {
                         <table className="data-table">
                           <thead>
                             <tr>
-                              <th>Medida</th>
-                              <th>Descripción</th>
-                              <th>Nominal</th>
-                              <th>X1</th>
-                              <th>Y1</th>
-                              <th>Unidad</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {m.housing_measurements.map((hm) => (
-                              <tr key={hm.housing_id}>
-                                <td>{hm.measure_code}</td>
-                                <td>{hm.housing_description || '-'}</td>
-                                <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
-                                <td>{hm.x1 ?? '-'}</td>
-                                <td>{hm.y1 ?? '-'}</td>
-                                <td>{hm.unit || '-'}</td>
+                                <th>Medida</th>
+                                <th>Descripción</th>
+                                <th>Nominal</th>
+                                <th>Tolerancia</th>
+                                <th>X1</th>
+                                <th>Y1</th>
+                                <th>Unidad</th>
                               </tr>
-                            ))}
+                            </thead>
+                            <tbody>
+                              {m.housing_measurements.map((hm) => (
+                                <tr key={hm.housing_id}>
+                                  <td>{hm.measure_code}</td>
+                                  <td>{hm.housing_description || '-'}</td>
+                                  <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
+                                  <td>{hm.tolerance || '-'}</td>
+                                  <td>{hm.x1 ?? '-'}</td>
+                                  <td>{hm.y1 ?? '-'}</td>
+                                  <td>{hm.unit || '-'}</td>
+                                </tr>
+                              ))}
                           </tbody>
                         </table>
                       </div>
@@ -247,25 +291,27 @@ export default function TechnicianWorkOrderDetail() {
                         <table className="data-table">
                           <thead>
                             <tr>
-                              <th>Medida</th>
-                              <th>Descripción</th>
-                              <th>Nominal</th>
-                              <th>X1</th>
-                              <th>Y1</th>
-                              <th>Unidad</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {m.housing_measurements.map((hm) => (
-                              <tr key={hm.housing_id}>
-                                <td>{hm.measure_code}</td>
-                                <td>{hm.housing_description || '-'}</td>
-                                <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
-                                <td>{hm.x1 ?? '-'}</td>
-                                <td>{hm.y1 ?? '-'}</td>
-                                <td>{hm.unit || '-'}</td>
+                                <th>Medida</th>
+                                <th>Descripción</th>
+                                <th>Nominal</th>
+                                <th>Tolerancia</th>
+                                <th>X1</th>
+                                <th>Y1</th>
+                                <th>Unidad</th>
                               </tr>
-                            ))}
+                            </thead>
+                            <tbody>
+                              {m.housing_measurements.map((hm) => (
+                                <tr key={hm.housing_id}>
+                                  <td>{hm.measure_code}</td>
+                                  <td>{hm.housing_description || '-'}</td>
+                                  <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
+                                  <td>{hm.tolerance || '-'}</td>
+                                  <td>{hm.x1 ?? '-'}</td>
+                                  <td>{hm.y1 ?? '-'}</td>
+                                  <td>{hm.unit || '-'}</td>
+                                </tr>
+                              ))}
                           </tbody>
                         </table>
                       </div>
@@ -421,6 +467,7 @@ export default function TechnicianWorkOrderDetail() {
                         <th>Medida</th>
                         <th>Descripción</th>
                         <th>Nominal</th>
+                        <th>Tolerancia</th>
                         <th>X1</th>
                         <th>Y1</th>
                         <th>Unidad</th>
@@ -434,6 +481,8 @@ export default function TechnicianWorkOrderDetail() {
                             <td style={{ fontWeight: 700 }}>{h.measure_code}</td>
                             <td>{h.description || '-'}</td>
                             <td>{h.nominal_value !== null && h.nominal_value !== undefined ? `${h.nominal_value} ${h.nominal_unit || ''}` : '-'}</td>
+                            <td>{h.tolerance || '-'}</td>
+                            <td>{h.tolerance || '-'}</td>
                             <td>
                               <input
                                 type="number"

@@ -54,6 +54,7 @@ export default function Equipment() {
     description: ''
   });
   const [documentFile, setDocumentFile] = useState(null);
+  const [documentFiles, setDocumentFiles] = useState([]);
 
   // Filters
   const [brandFilter, setBrandFilter] = useState('');
@@ -258,29 +259,35 @@ export default function Equipment() {
   // Documents handlers
   const handleDocumentSubmit = async (e) => {
     e.preventDefault();
-    if (!documentFile) {
-      showWarning('Por favor seleccione un archivo', 'Archivo requerido');
+    if (!documentFiles || documentFiles.length === 0) {
+      showWarning('Por favor seleccione al menos un archivo', 'Archivo requerido');
       return;
     }
     try {
-      const formData = new FormData();
-      formData.append('document', documentFile);
-      formData.append('brandId', documentFormData.brandId || '');
-      formData.append('modelId', documentFormData.modelId || '');
-      formData.append('documentType', documentFormData.documentType);
-      formData.append('description', documentFormData.description || '');
+      // Subir cada archivo individualmente
+      const uploadPromises = Array.from(documentFiles).map(async (file) => {
+        const formData = new FormData();
+        formData.append('document', file);
+        formData.append('brandId', documentFormData.brandId || '');
+        formData.append('modelId', documentFormData.modelId || '');
+        formData.append('documentType', documentFormData.documentType);
+        formData.append('description', documentFormData.description || '');
 
-      await api.post('/equipment/documents', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        return api.post('/equipment/documents', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
       });
+
+      await Promise.all(uploadPromises);
       
       setShowDocumentModal(false);
       setDocumentFormData({ brandId: '', modelId: '', documentType: 'manual', description: '' });
+      setDocumentFiles([]);
       setDocumentFile(null);
       fetchEquipmentDocuments();
-      showSuccess('Documento subido correctamente');
+      showSuccess(`${documentFiles.length} documento(s) subido(s) correctamente`);
     } catch (error) {
-      showError(error.response?.data?.error || 'Error al subir el documento');
+      showError(error.response?.data?.error || 'Error al subir los documentos');
     }
   };
 
@@ -696,6 +703,7 @@ export default function Equipment() {
             <div className="table-header-actions">
               <button onClick={() => {
                 setDocumentFormData({ brandId: '', modelId: '', documentType: 'manual', description: '' });
+                setDocumentFiles([]);
                 setDocumentFile(null);
                 setShowDocumentModal(true);
               }} className="btn-primary">+ Subir Documento</button>
@@ -966,13 +974,24 @@ export default function Equipment() {
                 </select>
               </div>
               <div style={{ marginBottom: '15px' }}>
-                <label>Archivo *</label>
+                <label>Archivo(s) *</label>
                 <input 
                   type="file" 
                   accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => setDocumentFile(e.target.files[0])}
+                  multiple
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    setDocumentFiles(files);
+                    // Mantener compatibilidad con documentFile para el estado anterior
+                    setDocumentFile(files.length > 0 ? files[0] : null);
+                  }}
                   required
                 />
+                {documentFiles.length > 0 && (
+                  <div style={{ marginTop: '8px', fontSize: '14px', color: '#666' }}>
+                    {documentFiles.length} archivo(s) seleccionado(s)
+                  </div>
+                )}
               </div>
               <textarea 
                 placeholder="Descripción" 

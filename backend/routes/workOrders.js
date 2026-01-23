@@ -151,7 +151,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
           woh.measure_code,
           woh.description as housing_description,
           woh.nominal_value,
-          woh.nominal_unit
+          woh.nominal_unit,
+          woh.tolerance
         FROM work_order_housing_measurements wohm
         JOIN work_order_housings woh ON wohm.housing_id = woh.id
         JOIN measurements m ON wohm.measurement_id = m.id
@@ -313,7 +314,8 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
         h.measureCode || h.measure_code || null,
         h.description || null,
         h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? h.nominalValue : null,
-        h.unit || h.nominalUnit || h.nominal_unit || null
+        h.unit || h.nominalUnit || h.nominal_unit || null,
+        h.tolerance || null
       ]));
 
       // Basic validation: measureCode must exist
@@ -322,7 +324,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
       }
 
       await pool.query(
-        `INSERT INTO work_order_housings (work_order_id, measure_code, description, nominal_value, nominal_unit)
+        `INSERT INTO work_order_housings (work_order_id, measure_code, description, nominal_value, nominal_unit, tolerance)
          VALUES ?`,
         [values]
       );
