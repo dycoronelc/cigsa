@@ -482,7 +482,6 @@ export default function TechnicianWorkOrderDetail() {
                             <td>{h.description || '-'}</td>
                             <td>{h.nominal_value !== null && h.nominal_value !== undefined ? `${h.nominal_value} ${h.nominal_unit || ''}` : '-'}</td>
                             <td>{h.tolerance || '-'}</td>
-                            <td>{h.tolerance || '-'}</td>
                             <td>
                               <input
                                 type="number"

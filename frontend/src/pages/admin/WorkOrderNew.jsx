@@ -358,8 +358,8 @@ export default function WorkOrderNew() {
                     <th>Medida</th>
                     <th>Descripción</th>
                     <th>Medida Nominal</th>
-                    <th>Unidad</th>
                     <th>Tolerancia</th>
+                    <th>Unidad</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -392,17 +392,6 @@ export default function WorkOrderNew() {
                       </td>
                       <td>
                         <input
-                          value={h.nominalUnit}
-                          onChange={(e) => {
-                            const next = [...serviceHousings];
-                            next[idx] = { ...next[idx], nominalUnit: e.target.value };
-                            setServiceHousings(next);
-                          }}
-                          placeholder="mm, in, etc."
-                        />
-                      </td>
-                      <td>
-                        <input
                           type="text"
                           value={h.tolerance}
                           onChange={(e) => {
@@ -412,6 +401,17 @@ export default function WorkOrderNew() {
                           }}
                           placeholder="+0.5, -0.3, ±0.2"
                           pattern="[+\-±]?[0-9]*\.?[0-9]*"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={h.nominalUnit}
+                          onChange={(e) => {
+                            const next = [...serviceHousings];
+                            next[idx] = { ...next[idx], nominalUnit: e.target.value };
+                            setServiceHousings(next);
+                          }}
+                          placeholder="mm, in, etc."
                         />
                       </td>
                     </tr>
