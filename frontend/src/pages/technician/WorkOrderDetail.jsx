@@ -9,12 +9,14 @@ import './Technician.css';
 export default function TechnicianWorkOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { alertDialog, showError, closeAlert } = useAlert();
+  const { alertDialog, showError, showSuccess, closeAlert } = useAlert();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('details');
   const [showMeasurementModal, setShowMeasurementModal] = useState(false);
   const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [photoSource, setPhotoSource] = useState(null); // 'camera' | 'gallery' | null
+  const [selectedPhotos, setSelectedPhotos] = useState([]);
   const [showObservationModal, setShowObservationModal] = useState(false);
   const [measurementData, setMeasurementData] = useState({ measurementType: 'initial', notes: '', housingMeasurements: [] });
   const [observationData, setObservationData] = useState({ observation: '', observationType: 'general' });
@@ -72,16 +74,57 @@ export default function TechnicianWorkOrderDetail() {
 
   const handlePhotoSubmit = async (e) => {
     e.preventDefault();
-    const formData = new FormData(e.target);
+    
     try {
-      await api.post(`/work-orders/${id}/photos`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      const photoType = e.target.photoType.value;
+      const description = e.target.description.value;
+      
+      // Si hay fotos seleccionadas de la galería, subirlas todas
+      if (photoSource === 'gallery' && selectedPhotos.length > 0) {
+        const uploadPromises = selectedPhotos.map(async (file) => {
+          const formData = new FormData();
+          formData.append('photo', file);
+          formData.append('photoType', photoType);
+          formData.append('description', description);
+          
+          return api.post(`/work-orders/${id}/photos`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+        });
+        
+        await Promise.all(uploadPromises);
+      } else {
+        // Para cámara, usar el formulario normal
+        const formData = new FormData(e.target);
+        await api.post(`/work-orders/${id}/photos`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      }
+      
       setShowPhotoModal(false);
+      setPhotoSource(null);
+      setSelectedPhotos([]);
       fetchOrder();
+      
+      if (photoSource === 'gallery' && selectedPhotos.length > 1) {
+        showSuccess(`${selectedPhotos.length} fotos subidas correctamente`);
+      } else {
+        showSuccess('Foto subida correctamente');
+      }
     } catch (error) {
-      showError('Error al subir foto');
+      showError('Error al subir foto(s)');
     }
+  };
+
+  const handleCameraClick = () => {
+    setPhotoSource('camera');
+    setSelectedPhotos([]);
+    setShowPhotoModal(true);
+  };
+
+  const handleGalleryClick = () => {
+    setPhotoSource('gallery');
+    setShowPhotoModal(true);
   };
 
   const handleObservationSubmit = async (e) => {
@@ -342,9 +385,21 @@ export default function TechnicianWorkOrderDetail() {
 
         {activeTab === 'photos' && (
           <div className="photos-section">
-            <div className="section-actions">
-              <button onClick={() => setShowPhotoModal(true)} className="btn-primary">
-                + Tomar Foto
+            <div className="section-actions" style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={handleCameraClick} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+                Tomar Foto
+              </button>
+              <button onClick={handleGalleryClick} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                Seleccionar de Galería
               </button>
             </div>
             {order.photos && order.photos.length > 0 ? (
@@ -541,11 +596,38 @@ export default function TechnicianWorkOrderDetail() {
       )}
 
       {showPhotoModal && (
-        <div className="modal-overlay" onClick={() => setShowPhotoModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowPhotoModal(false); setPhotoSource(null); setSelectedPhotos([]); }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>Tomar Foto</h2>
+            <h2>{photoSource === 'camera' ? 'Tomar Foto' : 'Seleccionar Fotos de Galería'}</h2>
             <form onSubmit={handlePhotoSubmit}>
-              <input type="file" name="photo" accept="image/*" capture="environment" required />
+              {photoSource === 'camera' ? (
+                <input 
+                  type="file" 
+                  name="photo" 
+                  accept="image/*" 
+                  capture="environment" 
+                  required 
+                />
+              ) : (
+                <div>
+                  <input 
+                    type="file" 
+                    name="photo" 
+                    accept="image/*" 
+                    multiple
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      setSelectedPhotos(files);
+                    }}
+                    required 
+                  />
+                  {selectedPhotos.length > 0 && (
+                    <div style={{ marginTop: '12px', padding: '12px', background: '#f5f5f5', borderRadius: '6px' }}>
+                      <strong>{selectedPhotos.length}</strong> foto(s) seleccionada(s)
+                    </div>
+                  )}
+                </div>
+              )}
               <select name="photoType">
                 <option value="inspection">Inspección</option>
                 <option value="during_service">Durante Servicio</option>
@@ -553,8 +635,10 @@ export default function TechnicianWorkOrderDetail() {
               </select>
               <textarea name="description" placeholder="Descripción (opcional)" />
               <div className="modal-actions">
-                <button type="button" onClick={() => setShowPhotoModal(false)}>Cancelar</button>
-                <button type="submit" className="btn-primary">Subir</button>
+                <button type="button" onClick={() => { setShowPhotoModal(false); setPhotoSource(null); setSelectedPhotos([]); }}>Cancelar</button>
+                <button type="submit" className="btn-primary">
+                  {photoSource === 'gallery' && selectedPhotos.length > 1 ? `Subir ${selectedPhotos.length} Fotos` : 'Subir'}
+                </button>
               </div>
             </form>
           </div>

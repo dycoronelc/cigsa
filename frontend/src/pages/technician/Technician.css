@@ -221,6 +221,22 @@
   margin-bottom: 1.5rem;
 }
 
+.section-actions button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s;
+}
+
+.section-actions button svg {
+  flex-shrink: 0;
+}
+
+.section-actions button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
 .measurement-card {
   background: var(--bg);
   border: 1px solid var(--border);
