@@ -328,6 +328,139 @@ curl -sS http://127.0.0.1:3001/api/health
 sudo nginx -T | grep -A 5 "location /api"
 ```
 
+### Las fotos subidas no se muestran (icono roto o placeholder)
+
+Las fotos se guardan en el backend y se sirven en la ruta `/uploads/photos/`. Nginx debe servir esa ruta (con `alias` o con `proxy_pass`) para que las imágenes carguen.
+
+#### Si Nginx ya tiene `location /uploads` con `alias` (tu caso)
+
+No cambies Nginx. Haz lo siguiente:
+
+1. **Backend: directorio y permisos**
+   - El backend guarda las fotos en `backend/uploads/photos` (ruta completa en el servidor: `/var/www/cigsa/backend/uploads/photos`).
+   - Comprueba que existe y que el usuario con el que corre el backend (PM2) puede escribir:
+   ```bash
+   ls -la /var/www/cigsa/backend/uploads/photos
+   # Si no existe o hay errores de permisos:
+   mkdir -p /var/www/cigsa/backend/uploads/photos
+   sudo chown -R $USER:$USER /var/www/cigsa/backend/uploads
+   # Si Nginx corre con www-data y quieres que también lea:
+   # sudo chown -R $USER:www-data /var/www/cigsa/backend/uploads
+   # sudo chmod -R 755 /var/www/cigsa/backend/uploads
+   ```
+
+2. **Frontend: desplegar el código actual**
+   - En el frontend ya están hechos los cambios para que las fotos se muestren (URL correcta) y para que el botón "Subir" funcione en móvil/tablet (cámara y galería).
+   - Sube los últimos cambios al servidor y vuelve a construir el frontend:
+   ```bash
+   cd /var/www/cigsa
+   git pull origin main
+   cd frontend
+   npm install
+   npm run build
+   ```
+   - Si accedes por IP (ej. `http://165.245.137.48`) y el API está en el mismo servidor, no hace falta definir variables al hacer `npm run build`. Si las fotos siguen sin verse, prueba a construir con la URL del API:
+   ```bash
+   VITE_API_URL=http://165.245.137.48/api npm run build
+   ```
+   (Sustituye la IP por tu IP o dominio.)
+
+3. **Reiniciar solo si cambias backend**
+   ```bash
+   pm2 restart cigsa-backend
+   ```
+
+4. **Probar**
+   - Abre la app en el navegador (y en el móvil/tablet).
+   - En una orden, pestaña Fotos: "Tomar Foto" → toma la foto → "Subir". Debe subir y verse en la lista.
+   - "Seleccionar de Galería" → elige una o varias → "Subir". Deben subir y verse.
+
+Resumen: **no toques Nginx**; asegura `backend/uploads/photos` con permisos correctos y despliega el frontend actual (build y, si hace falta, `VITE_API_URL`).
+
+---
+
+#### Cómo añadir el `location /uploads` en Nginx (si no lo tienes)
+
+1. **Conectarte al servidor por SSH** (si no estás ya):
+   ```bash
+   ssh root@165.245.137.48
+   ```
+   (Usa tu usuario e IP.)
+
+2. **Abrir el archivo de configuración del sitio.** Suele estar en:
+   - `/etc/nginx/sites-available/cigsa`  
+   o
+   - `/etc/nginx/conf.d/cigsa.conf`  
+   Para ver qué archivos tienes:
+   ```bash
+   ls /etc/nginx/sites-available/
+   # o
+   ls /etc/nginx/conf.d/
+   ```
+
+3. **Editar el archivo** (cambia la ruta si es distinta):
+   ```bash
+   sudo nano /etc/nginx/sites-available/cigsa
+   ```
+
+4. **Dentro del bloque `server { ... }`**, añade el bloque `location /uploads` **antes** del `location /` (si existe). Debe quedar algo así:
+   ```nginx
+   server {
+       listen 80;
+       server_name 165.245.137.48;   # o tu dominio
+
+       root /var/www/cigsa/frontend/dist;
+       index index.html;
+
+       # Proxy de /uploads al backend (fotos, archivos subidos)
+       location /uploads {
+           proxy_pass http://127.0.0.1:3001;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+       }
+
+       # Proxy del API al backend
+       location /api {
+           proxy_pass http://127.0.0.1:3001;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+
+       # Frontend (SPA)
+       location / {
+           try_files $uri $uri/ /index.html;
+       }
+   }
+   ```
+   Lo importante es que exista este bloque:
+   ```nginx
+   location /uploads {
+       proxy_pass http://127.0.0.1:3001;
+       proxy_http_version 1.1;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+   }
+   ```
+   (El puerto `3001` debe ser el mismo donde corre tu backend con PM2.)
+
+5. **Guardar y salir** en nano: `Ctrl+O`, Enter, luego `Ctrl+X`.
+
+6. **Comprobar que la configuración es válida** y recargar Nginx:
+   ```bash
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+   Si `nginx -t` muestra "syntax is ok" y "test is successful", las fotos deberían cargar al recargar.
+
+7. **(Opcional)** Si usas IP o dominio para el API, al hacer el build del frontend configura la URL del API, por ejemplo:
+   ```bash
+   VITE_API_URL=http://165.245.137.48/api npm run build
+   ```
+   Así las URLs de las fotos apuntan al mismo origen y Nginx sirve `/uploads` desde el backend.
+
 ---
 
 ## Notas Importantes

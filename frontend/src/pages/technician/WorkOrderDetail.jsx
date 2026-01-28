@@ -75,10 +75,12 @@ export default function TechnicianWorkOrderDetail() {
   };
 
   const handlePhotoSubmit = async (e) => {
-    e.preventDefault();
-    if (selectedPhotos.length === 0) return;
-    const photoType = e.target.photoType.value;
-    const description = e.target.description.value;
+    e?.preventDefault?.();
+    const count = selectedPhotos.length;
+    if (count === 0) return;
+    const form = typeof e?.target?.photoType !== 'undefined' ? e.target : document.getElementById('photo-upload-form');
+    const photoType = form?.photoType?.value || 'during_service';
+    const description = form?.description?.value || '';
     try {
       const uploadPromises = selectedPhotos.map(async (file) => {
         const formData = new FormData();
@@ -94,8 +96,8 @@ export default function TechnicianWorkOrderDetail() {
       setPhotoSource(null);
       setSelectedPhotos([]);
       fetchOrder();
-      if (selectedPhotos.length > 1) {
-        showSuccess(`${selectedPhotos.length} fotos subidas correctamente`);
+      if (count > 1) {
+        showSuccess(`${count} fotos subidas correctamente`);
       } else {
         showSuccess('Foto subida correctamente');
       }
@@ -629,7 +631,7 @@ export default function TechnicianWorkOrderDetail() {
             <div style={{ marginBottom: '12px', padding: '12px', background: '#f5f5f5', borderRadius: '6px' }}>
               <strong>{selectedPhotos.length}</strong> foto(s) seleccionada(s)
             </div>
-            <form onSubmit={handlePhotoSubmit}>
+            <form id="photo-upload-form" onSubmit={handlePhotoSubmit}>
               <select name="photoType">
                 <option value="inspection">Inspección</option>
                 <option value="during_service">Durante Servicio</option>
@@ -638,7 +640,11 @@ export default function TechnicianWorkOrderDetail() {
               <textarea name="description" placeholder="Descripción (opcional)" />
               <div className="modal-actions">
                 <button type="button" onClick={() => { setShowPhotoModal(false); setPhotoSource(null); setSelectedPhotos([]); }}>Cancelar</button>
-                <button type="submit" className="btn-primary">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => handlePhotoSubmit({ preventDefault: () => {}, target: document.getElementById('photo-upload-form') })}
+                >
                   {selectedPhotos.length > 1 ? `Subir ${selectedPhotos.length} Fotos` : 'Subir'}
                 </button>
               </div>
