@@ -64,12 +64,20 @@ export default function TechnicianWorkOrderDetail() {
   const [showObservationModal, setShowObservationModal] = useState(false);
   const [measurementData, setMeasurementData] = useState({ measurementType: 'initial', notes: '', housingMeasurements: [] });
   const [observationData, setObservationData] = useState({ observation: '', observationType: 'general' });
+  const [expandedPhoto, setExpandedPhoto] = useState(null);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
 
   useEffect(() => {
     fetchOrder();
   }, [id]);
+
+  useEffect(() => {
+    if (!expandedPhoto) return;
+    const onKeyDown = (e) => { if (e.key === 'Escape') setExpandedPhoto(null); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [expandedPhoto]);
 
   const fetchOrder = async () => {
     try {
@@ -181,6 +189,17 @@ export default function TechnicianWorkOrderDetail() {
       setShowPhotoModal(true);
     }
     e.target.value = '';
+  };
+
+  const handleDeletePhoto = async (photoId) => {
+    if (!window.confirm('¿Eliminar esta foto?')) return;
+    try {
+      await api.delete(`/work-orders/${id}/photos/${photoId}`);
+      showSuccess('Foto eliminada');
+      fetchOrder();
+    } catch (error) {
+      showError('Error al eliminar la foto');
+    }
   };
 
   const handleObservationSubmit = async (e) => {
@@ -481,12 +500,60 @@ export default function TechnicianWorkOrderDetail() {
               <div className="photos-grid">
                 {order.photos.map(photo => (
                   <div key={photo.id} className="photo-item">
-                    <img src={getStaticUrl(photo.photo_path)} alt="Foto" />
+                    <img
+                      src={getStaticUrl(photo.photo_path)}
+                      alt="Foto"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setExpandedPhoto(photo)}
+                      onKeyDown={(e) => e.key === 'Enter' && setExpandedPhoto(photo)}
+                      title="Ampliar"
+                    />
+                    <button
+                      type="button"
+                      className="photo-delete-btn"
+                      onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo.id); }}
+                      title="Eliminar foto"
+                      aria-label="Eliminar foto"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                      </svg>
+                      Eliminar
+                    </button>
                   </div>
                 ))}
               </div>
             ) : (
               <p className="empty-message">No hay fotos</p>
+            )}
+
+            {expandedPhoto && (
+              <div
+                className="photo-lightbox-overlay"
+                onClick={() => setExpandedPhoto(null)}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Foto ampliada"
+              >
+                <button
+                  type="button"
+                  className="photo-lightbox-close"
+                  onClick={() => setExpandedPhoto(null)}
+                  aria-label="Cerrar"
+                >
+                  ×
+                </button>
+                <img
+                  src={getStaticUrl(expandedPhoto.photo_path)}
+                  alt="Foto ampliada"
+                  onClick={(e) => e.stopPropagation()}
+                  className="photo-lightbox-img"
+                />
+              </div>
             )}
           </div>
         )}

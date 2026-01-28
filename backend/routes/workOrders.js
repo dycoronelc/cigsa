@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -568,6 +569,39 @@ router.post('/:id/photos', authenticateToken, upload.single('photo'), async (req
     });
   } catch (error) {
     console.error('Upload photo error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete photo
+router.delete('/:id/photos/:photoId', authenticateToken, async (req, res) => {
+  try {
+    const pool = await getConnection();
+    const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const [photos] = await pool.query(
+      'SELECT id, photo_path FROM work_order_photos WHERE work_order_id = ? AND id = ?',
+      [req.params.id, req.params.photoId]
+    );
+    if (photos.length === 0) {
+      return res.status(404).json({ error: 'Photo not found' });
+    }
+    const photoPath = photos[0].photo_path;
+    await pool.query('DELETE FROM work_order_photos WHERE id = ?', [req.params.photoId]);
+    await logActivity(req.user.id, 'DELETE', 'photo', parseInt(req.params.photoId), 'Deleted photo', req.ip);
+    const filename = path.basename(photoPath);
+    const filePath = path.join(__dirname, '..', 'uploads', 'photos', filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    res.status(200).json({ message: 'Photo deleted successfully' });
+  } catch (error) {
+    console.error('Delete photo error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
