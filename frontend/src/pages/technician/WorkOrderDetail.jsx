@@ -6,6 +6,50 @@ import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
 import './Technician.css';
 
+// Comprime una imagen en el navegador para subir más rápido (menor tamaño y tiempo)
+function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.82) {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) {
+      resolve(file);
+      return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      if (width > maxWidth || height > maxHeight) {
+        const ratio = Math.min(maxWidth / width, maxHeight / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          const name = file.name.replace(/\.[^.]+$/, '.jpg') || 'photo.jpg';
+          const compressed = new File([blob], name, { type: 'image/jpeg', lastModified: Date.now() });
+          resolve(compressed);
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
+
 export default function TechnicianWorkOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -119,19 +163,21 @@ export default function TechnicianWorkOrderDetail() {
     galleryInputRef.current?.click();
   };
 
-  const handleCameraFileChange = (e) => {
+  const handleCameraFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      setSelectedPhotos([file]);
+      const compressed = await compressImage(file);
+      setSelectedPhotos([compressed]);
       setShowPhotoModal(true);
     }
     e.target.value = '';
   };
 
-  const handleGalleryFileChange = (e) => {
+  const handleGalleryFileChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length) {
-      setSelectedPhotos(files);
+      const compressed = await Promise.all(files.map((f) => compressImage(f)));
+      setSelectedPhotos(compressed);
       setShowPhotoModal(true);
     }
     e.target.value = '';

@@ -377,6 +377,116 @@ No cambies Nginx. Haz lo siguiente:
 
 Resumen: **no toques Nginx**; asegura `backend/uploads/photos` con permisos correctos y despliega el frontend actual (build y, si hace falta, `VITE_API_URL`).
 
+#### 404 (Not Found) en `/uploads/photos/...` aunque los archivos existen
+
+Si los archivos están en `/var/www/cigsa/backend/uploads/photos/` pero el navegador devuelve 404 al pedir `http://tu-ip/uploads/photos/archivo.jpg`, suele ser por cómo Nginx interpreta `alias`. Usa **barra final** en `location` y en `alias`:
+
+1. Edita la config de Nginx:
+   ```bash
+   sudo nano /etc/nginx/sites-available/cigsa
+   ```
+
+2. Cambia el bloque de este modo:
+   - **Antes (puede dar 404):**
+     ```nginx
+     location /uploads {
+         alias /var/www/cigsa/backend/uploads;
+         ...
+     }
+     ```
+   - **Después (recomendado):**
+     ```nginx
+     location /uploads/ {
+         alias /var/www/cigsa/backend/uploads/;
+         expires 30d;
+         add_header Cache-Control "public, immutable";
+     }
+     ```
+   Es decir: `location /uploads/` y `alias .../uploads/` **con barra final**.
+
+3. Verifica y recarga Nginx:
+   ```bash
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+4. Si sigue el 404, revisa el log de Nginx al hacer la petición:
+   ```bash
+   sudo tail -f /var/log/nginx/error.log
+   ```
+   En otra terminal o en el navegador carga la foto; en el log verás la ruta que Nginx está usando.
+
+#### El log dice "open() .../frontend/dist/uploads/photos/... failed"
+
+Eso significa que la petición `/uploads/photos/...` está siendo atendida por el `location /` (frontend), no por un `location /uploads/`. Nginx está usando `root` del frontend y busca el archivo en `frontend/dist/uploads/photos/`, donde no están las fotos (están en `backend/uploads/photos/`).
+
+**Solución:** Añadir (o corregir) el bloque `location /uploads/` **antes** del `location /`, y que el `alias` apunte al backend. Si además tienes una `location` con **regex** para archivos estáticos (ej. `location ~* \.(js|css|png|jpg|jpeg|...)$`), esa regex puede estar capturando las peticiones a `/uploads/photos/archivo.jpg`. Usa el modificador **`^~`** en `location /uploads/` para que tenga prioridad y Nginx no pruebe la regex:
+
+```nginx
+# ^~ evita que una location con regex (ej. \.jpg) capture /uploads/photos/archivo.jpg
+location ^~ /uploads/ {
+    alias /var/www/cigsa/backend/uploads/;
+    expires 30d;
+    add_header Cache-Control "public, immutable";
+}
+
+location / {
+    root /var/www/cigsa/frontend/dist;
+    try_files $uri $uri/ /index.html;
+}
+```
+
+Guarda, verifica y recarga:
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**Si el log sigue mostrando `frontend/dist/uploads`:** Comprueba que el bloque se aplica. En el servidor ejecuta:
+```bash
+sudo nginx -T | grep -A 6 "location /uploads"
+```
+Debe aparecer `alias /var/www/cigsa/backend/uploads/`. Si no aparece, o el alias apunta a `frontend/dist`, el archivo que editaste no es el que está activo o hay otro `location /` que tiene prioridad. Revisa que solo exista un bloque `server` para esa IP/puerto (o que **todos** incluyan el `location /uploads/` con alias al backend).
+
+---
+
+#### Error "client intended to send too large body" al subir foto
+
+Nginx limita por defecto el tamaño del cuerpo de la petición a **1 MB**. Las fotos de cámara suelen ser mayores, por eso el POST a `/api/work-orders/.../photos` falla (ej. "1602133 bytes").
+
+**Solución:** Aumentar el límite en el bloque `server` (o en el `location /api`). Edita la config:
+
+```bash
+sudo nano /etc/nginx/sites-available/cigsa
+```
+
+Dentro del `server { ... }` que usa el puerto 80 (y el que uses para la app), añade al inicio del bloque:
+
+```nginx
+server {
+    listen 80;
+    server_name 165.245.137.48;
+
+    client_max_body_size 10M;   # permite subir fotos de hasta 10 MB
+
+    location /uploads/ {
+        alias /var/www/cigsa/backend/uploads/;
+        ...
+    }
+    location /api {
+        ...
+    }
+    location / {
+        ...
+    }
+}
+```
+
+Guarda, verifica y recarga:
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Con eso las subidas de fotos de cámara (y galería) de hasta 10 MB deberían funcionar.
+
 ---
 
 #### Cómo añadir el `location /uploads` en Nginx (si no lo tienes)
