@@ -7,17 +7,23 @@ export function useAlert() {
     title: '',
     message: '',
     onConfirm: null,
-    showCancel: false
+    showCancel: false,
+    confirmText: 'Aceptar',
+    cancelText: 'Cancelar',
+    confirmDanger: false
   });
 
-  const showAlert = useCallback(({ type = 'info', title = '', message = '', onConfirm = null, showCancel = false }) => {
+  const showAlert = useCallback(({ type = 'info', title = '', message = '', onConfirm = null, showCancel = false, confirmText = 'Aceptar', cancelText = 'Cancelar', confirmDanger = false }) => {
     setAlertDialog({
       isOpen: true,
       type,
       title,
       message,
       onConfirm,
-      showCancel
+      showCancel,
+      confirmText,
+      cancelText,
+      confirmDanger
     });
   }, []);
 
@@ -33,8 +39,9 @@ export function useAlert() {
     showAlert({ type: 'warning', title, message });
   }, [showAlert]);
 
-  const showConfirm = useCallback((message, onConfirm, title = 'Confirmar') => {
-    showAlert({ type: 'confirm', title, message, onConfirm, showCancel: true });
+  const showConfirm = useCallback((message, onConfirm, title = 'Confirmar', options = {}) => {
+    const { confirmText = 'Aceptar', cancelText = 'Cancelar', confirmDanger = false } = options;
+    showAlert({ type: 'confirm', title, message, onConfirm, showCancel: true, confirmText, cancelText, confirmDanger });
   }, [showAlert]);
 
   const closeAlert = useCallback(() => {

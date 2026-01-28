@@ -10,7 +10,8 @@ export default function AlertDialog({
   onConfirm,
   confirmText = 'Aceptar',
   cancelText = 'Cancelar',
-  showCancel = false
+  showCancel = false,
+  confirmDanger = false
 }) {
   useEffect(() => {
     if (isOpen) {
@@ -75,7 +76,7 @@ export default function AlertDialog({
           )}
           <button 
             type="button" 
-            className={`alert-dialog-btn alert-dialog-btn-${type}`}
+            className={`alert-dialog-btn alert-dialog-btn-${confirmDanger && type === 'confirm' ? 'error' : type}`}
             onClick={handleConfirm}
           >
             {confirmText}

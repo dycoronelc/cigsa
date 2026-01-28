@@ -9,7 +9,7 @@ import './WorkOrderDetail.css';
 export default function WorkOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { alertDialog, showError, showSuccess, closeAlert } = useAlert();
+  const { alertDialog, showError, showSuccess, showConfirm, closeAlert } = useAlert();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('details');
@@ -57,15 +57,21 @@ export default function WorkOrderDetail() {
     }
   };
 
-  const handleDeletePhoto = async (photoId) => {
-    if (!window.confirm('¿Eliminar esta foto?')) return;
-    try {
-      await api.delete(`/work-orders/${id}/photos/${photoId}`);
-      showSuccess('Foto eliminada');
-      fetchOrder();
-    } catch (error) {
-      showError('Error al eliminar la foto');
-    }
+  const handleDeletePhoto = (photoId) => {
+    showConfirm(
+      '¿Eliminar esta foto? Esta acción no se puede deshacer.',
+      async () => {
+        try {
+          await api.delete(`/work-orders/${id}/photos/${photoId}`);
+          showSuccess('Foto eliminada');
+          fetchOrder();
+        } catch (error) {
+          showError('Error al eliminar la foto');
+        }
+      },
+      'Eliminar foto',
+      { confirmText: 'Eliminar', cancelText: 'Cancelar', confirmDanger: true }
+    );
   };
 
   if (loading) {
@@ -546,6 +552,9 @@ export default function WorkOrderDetail() {
         message={alertDialog.message}
         onConfirm={alertDialog.onConfirm}
         showCancel={alertDialog.showCancel}
+        confirmText={alertDialog.confirmText}
+        cancelText={alertDialog.cancelText}
+        confirmDanger={alertDialog.confirmDanger}
       />
     </div>
   );
