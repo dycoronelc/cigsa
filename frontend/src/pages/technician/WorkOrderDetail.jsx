@@ -625,24 +625,11 @@ export default function TechnicianWorkOrderDetail() {
                              doc.document_type === 'blueprint' ? 'Plano' :
                              doc.document_type === 'specification' ? 'Especificación' : 'Otro'}
                           </span>
-        )}
-      </div>
-
-      <AlertDialog
-        isOpen={alertDialog.isOpen}
-        onClose={closeAlert}
-        type={alertDialog.type}
-        title={alertDialog.title}
-        message={alertDialog.message}
-        onConfirm={alertDialog.onConfirm}
-        showCancel={alertDialog.showCancel}
-        confirmText={alertDialog.confirmText}
-        cancelText={alertDialog.cancelText}
-        confirmDanger={alertDialog.confirmDanger}
-      />
-    </div>
-  );
-})}
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="empty-message">No hay documentos</p>
@@ -803,6 +790,19 @@ export default function TechnicianWorkOrderDetail() {
           </div>
         </div>
       )}
+
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={closeAlert}
+        type={alertDialog.type}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onConfirm={alertDialog.onConfirm}
+        showCancel={alertDialog.showCancel}
+        confirmText={alertDialog.confirmText}
+        cancelText={alertDialog.cancelText}
+        confirmDanger={alertDialog.confirmDanger}
+      />
     </div>
   );
 }
