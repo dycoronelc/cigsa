@@ -141,6 +141,29 @@ https://tu-dominio.com
 curl -sS http://127.0.0.1/api/health
 ```
 
+### 404 al eliminar una foto (DELETE /api/work-orders/:id/photos/:photoId)
+
+Si al pulsar "Eliminar" en una foto el navegador muestra `DELETE .../photos/6 404 (Not Found)`:
+
+1. **El backend debe tener la ruta de eliminar foto** (añadida en el código). En el servidor, actualiza y reinicia:
+   ```bash
+   cd /var/www/cigsa
+   git pull origin main
+   cd backend
+   npm install
+   pm2 restart cigsa-backend
+   ```
+
+2. **Comprobar que la ruta responde** (sustituye ORDEN_ID y FOTO_ID por números válidos y usa un token de sesión):
+   ```bash
+   curl -sS -X DELETE "http://127.0.0.1:3001/api/work-orders/3/photos/6" \
+     -H "Authorization: Bearer TU_TOKEN"
+   ```
+   - Si la ruta existe: respuesta 200 con `{"message":"Photo deleted successfully"}` o 404 con `{"error":"Photo not found"}` (JSON).
+   - Si la ruta no existe en el backend: 404 sin cuerpo JSON (o HTML de Express).
+
+3. **Nginx debe reenviar el método DELETE.** En el `location /api` no debe haber `limit_except` que bloquee DELETE. Si usas `proxy_method` o algo similar, quítalo o incluye todos los métodos.
+
 También debería devolver el JSON del health check.
 
 ---
