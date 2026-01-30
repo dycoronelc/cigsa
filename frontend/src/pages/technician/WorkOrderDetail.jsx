@@ -68,6 +68,16 @@ export default function TechnicianWorkOrderDetail() {
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
 
+  const isDocVisibleToTechnician = (d) => {
+    const v = d?.is_visible_to_technician;
+    // backend may return TRUE/FALSE, 1/0, or null/undefined (treat as visible by default)
+    if (v === undefined || v === null) return true;
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return v === 1;
+    if (typeof v === 'string') return v === '1' || v.toLowerCase() === 'true';
+    return Boolean(v);
+  };
+
   useEffect(() => {
     fetchOrder();
   }, [id]);
@@ -594,9 +604,9 @@ export default function TechnicianWorkOrderDetail() {
 
         {activeTab === 'documents' && (
           <div className="documents-section">
-            {order.documents && order.documents.length > 0 ? (
+            {(order.documents || []).filter(isDocVisibleToTechnician).length > 0 ? (
               <div className="documents-list">
-                {order.documents.map(doc => {
+                {order.documents.filter(isDocVisibleToTechnician).map(doc => {
                   const docTypeLabels = {
                     blueprint: '📐 Plano',
                     manual: '📖 Manual Técnico',

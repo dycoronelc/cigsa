@@ -257,6 +257,19 @@ router.get('/:id', authenticateToken, async (req, res) => {
         });
       }
     }
+
+    // For technicians: only return documents marked visible.
+    // MySQL may return BOOLEAN as 0/1; treat null/undefined as visible (default).
+    const isVisibleToTechnician = (v) => {
+      if (v === undefined || v === null) return true;
+      if (typeof v === 'boolean') return v;
+      if (typeof v === 'number') return v === 1;
+      if (typeof v === 'string') return v === '1' || v.toLowerCase() === 'true';
+      return Boolean(v);
+    };
+    if (req.user?.role === 'technician') {
+      documents = documents.filter((d) => isVisibleToTechnician(d.is_visible_to_technician));
+    }
     
     res.json({
       ...order,
