@@ -32,6 +32,16 @@ export default function WorkOrderDetail() {
   const [technicians, setTechnicians] = useState([]);
   const [equipmentOptions, setEquipmentOptions] = useState([]);
 
+  const isDocVisibleToTechnician = (d) => {
+    const v = d?.is_visible_to_technician;
+    // backend may return TRUE/FALSE, 1/0, or null/undefined (treat as visible by default)
+    if (v === undefined || v === null) return true;
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return v === 1;
+    if (typeof v === 'string') return v === '1' || v.toLowerCase() === 'true';
+    return Boolean(v);
+  };
+
   useEffect(() => {
     fetchOrder();
   }, [id]);
@@ -723,7 +733,7 @@ export default function WorkOrderDetail() {
                     };
                     const docTypeLabel = docTypeLabels[doc.document_type] || '📄 Documento';
                     const isManual = doc.document_type === 'manual';
-                    const isVisible = doc.is_visible_to_technician !== false; // Default true if not set
+                    const isVisible = isDocVisibleToTechnician(doc);
                     
                     return (
                       <div key={doc.id} className={`document-item ${isManual ? 'document-manual' : ''}`}>
@@ -735,7 +745,7 @@ export default function WorkOrderDetail() {
                               try {
                                 const currentPermissions = order.documents.map(d => ({
                                   documentId: d.id,
-                                  isVisibleToTechnician: d.id === doc.id ? e.target.checked : (d.is_visible_to_technician !== false)
+                                  isVisibleToTechnician: d.id === doc.id ? e.target.checked : isDocVisibleToTechnician(d)
                                 }));
                                 await api.put(`/work-orders/${id}/documents/permissions`, {
                                   documentPermissions: currentPermissions
