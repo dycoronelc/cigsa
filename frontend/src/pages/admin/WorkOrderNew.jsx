@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
+import SearchableSelect from '../../components/SearchableSelect';
 import './WorkOrderNew.css';
 
 export default function WorkOrderNew() {
@@ -20,6 +21,7 @@ export default function WorkOrderNew() {
     equipmentId: '',
     serviceId: '',
     serviceLocation: '',
+    clientServiceOrderNumber: '',
     serviceHousingCount: '',
     title: '',
     description: '',
@@ -99,6 +101,16 @@ export default function WorkOrderNew() {
     setLoading(true);
 
     try {
+      if (!formData.clientId) {
+        showWarning('Seleccione un cliente.');
+        setLoading(false);
+        return;
+      }
+      if (!formData.equipmentId) {
+        showWarning('Seleccione un equipo.');
+        setLoading(false);
+        return;
+      }
       const count = formData.serviceHousingCount ? parseInt(formData.serviceHousingCount) : 0;
       if (count > 0) {
         if (!serviceHousings || serviceHousings.length !== count) {
@@ -106,9 +118,11 @@ export default function WorkOrderNew() {
           setLoading(false);
           return;
         }
-        const hasMissing = serviceHousings.some(h => !h.measureCode || !h.description || h.nominalValue === '' || !h.nominalUnit);
+        const hasMissing = serviceHousings.some(
+          (h) => !h.measureCode || !h.description || (h.nominalValue !== '' && !h.nominalUnit)
+        );
         if (hasMissing) {
-          showWarning('Complete Medida, Descripción, Medida Nominal y Unidad para cada alojamiento.');
+          showWarning('Complete Medida y Descripción. Si ingresa Medida Nominal, también indique la Unidad.');
           setLoading(false);
           return;
         }
@@ -119,11 +133,12 @@ export default function WorkOrderNew() {
         equipmentId: parseInt(formData.equipmentId),
         serviceId: formData.serviceId ? parseInt(formData.serviceId) : null,
         serviceLocation: formData.serviceLocation || null,
+        clientServiceOrderNumber: formData.clientServiceOrderNumber || null,
         serviceHousings: (parseInt(formData.serviceHousingCount) > 0) ? serviceHousings.map(h => ({
           measureCode: h.measureCode,
           description: h.description,
           nominalValue: h.nominalValue !== '' ? parseFloat(h.nominalValue) : null,
-          nominalUnit: h.nominalUnit,
+          nominalUnit: h.nominalValue !== '' ? (h.nominalUnit || null) : null,
           tolerance: h.tolerance || null
         })) : [],
         title: formData.title,
@@ -193,36 +208,30 @@ export default function WorkOrderNew() {
 
           <div className="form-group">
             <label htmlFor="equipmentId">Equipo *</label>
-            <select
+            <SearchableSelect
               id="equipmentId"
               value={formData.equipmentId}
-              onChange={(e) => setFormData({ ...formData, equipmentId: e.target.value })}
-              required
+              onChange={(val) => setFormData({ ...formData, equipmentId: val })}
+              options={equipment.map((eq) => ({
+                value: String(eq.id),
+                label: `${eq.brand_name} ${eq.model_name} - ${eq.serial_number}${eq.client_name ? ` (${eq.client_name})` : ''}`
+              }))}
+              placeholder={formData.clientId ? 'Escriba para buscar equipo...' : 'Primero seleccione un cliente'}
               disabled={!formData.clientId}
-            >
-              <option value="">{formData.clientId ? 'Seleccionar Equipo' : 'Primero seleccione un cliente'}</option>
-              {equipment.map(eq => (
-                <option key={eq.id} value={eq.id}>
-                  {eq.brand_name} {eq.model_name} - {eq.serial_number} {eq.client_name ? `(${eq.client_name})` : ''}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           <div className="form-group">
             <label htmlFor="serviceId">Servicio</label>
-            <select
+            <SearchableSelect
               id="serviceId"
               value={formData.serviceId}
-              onChange={(e) => handleServiceChange(e.target.value)}
-            >
-              <option value="">Seleccionar Servicio (Opcional)</option>
-              {services.map(service => (
-                <option key={service.id} value={service.id}>
-                  {service.code} - {service.name}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => handleServiceChange(val)}
+              options={services.map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
+              placeholder="Escriba para buscar servicio (opcional)..."
+              allowClear
+              clearLabel="(Opcional) Sin servicio"
+            />
           </div>
 
           <div className="form-group">
@@ -233,6 +242,17 @@ export default function WorkOrderNew() {
               value={formData.serviceLocation}
               onChange={(e) => setFormData({ ...formData, serviceLocation: e.target.value })}
               placeholder="Ej: Planta 1, Área X, Taller, etc."
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="clientServiceOrderNumber">N° Orden de Servicio del Cliente</label>
+            <input
+              type="text"
+              id="clientServiceOrderNumber"
+              value={formData.clientServiceOrderNumber}
+              onChange={(e) => setFormData({ ...formData, clientServiceOrderNumber: e.target.value })}
+              placeholder="Ej: OS-12345"
             />
           </div>
 
@@ -430,9 +450,11 @@ export default function WorkOrderNew() {
                     showWarning('Cantidad de alojamientos no coincide.');
                     return;
                   }
-                  const hasMissing = serviceHousings.some(h => !h.measureCode || !h.description || h.nominalValue === '' || !h.nominalUnit);
+                  const hasMissing = serviceHousings.some(
+                    (h) => !h.measureCode || !h.description || (h.nominalValue !== '' && !h.nominalUnit)
+                  );
                   if (hasMissing) {
-                    showWarning('Complete Descripción, Medida Nominal y Unidad para cada alojamiento.');
+                    showWarning('Complete Medida y Descripción. Si ingresa Medida Nominal, también indique la Unidad.');
                     return;
                   }
                   setShowHousingsModal(false);

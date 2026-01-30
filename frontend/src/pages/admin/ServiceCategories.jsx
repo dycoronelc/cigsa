@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { EditIcon, DeleteIcon, SearchIcon } from '../../components/Icons';
 import { useAlert } from '../../hooks/useAlert';
+import { useSortableData } from '../../hooks/useSortableData';
 import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
@@ -96,6 +97,14 @@ export default function ServiceCategories() {
     return c.name?.toLowerCase().includes(s) || c.description?.toLowerCase().includes(s);
   });
 
+  const { items: sortedCategories, requestSort, getSortDirection } = useSortableData(filtered);
+
+  const renderSortIndicator = (key) => {
+    const dir = getSortDirection(key);
+    if (!dir) return <span className="sort-indicator">↕</span>;
+    return <span className="sort-indicator">{dir === 'asc' ? '↑' : '↓'}</span>;
+  };
+
   return (
     <div className="management-page">
       <div className="page-header">
@@ -162,12 +171,12 @@ export default function ServiceCategories() {
           <thead>
             <tr>
               <th>Acciones</th>
-              <th>Nombre</th>
-              <th>Descripción</th>
+              <th className="sortable" onClick={() => requestSort('name')}>Nombre {renderSortIndicator('name')}</th>
+              <th className="sortable" onClick={() => requestSort('description')}>Descripción {renderSortIndicator('description')}</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((cat) => (
+            {sortedCategories.map((cat) => (
               <tr key={cat.id}>
                 <td>
                   <div className="action-buttons">

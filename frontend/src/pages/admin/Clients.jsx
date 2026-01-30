@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import api from '../../services/api';
 import { EditIcon, SearchIcon } from '../../components/Icons';
 import { useAlert } from '../../hooks/useAlert';
+import { useSortableData } from '../../hooks/useSortableData';
 import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
@@ -26,6 +27,24 @@ export default function Clients() {
   useEffect(() => {
     fetchClients();
   }, []);
+
+  const filteredClients = useMemo(() => {
+    return clients.filter((client) => {
+      if (!filter) return true;
+      const search = filter.toLowerCase();
+      return client.name?.toLowerCase().includes(search) ||
+             client.company_name?.toLowerCase().includes(search) ||
+             client.email?.toLowerCase().includes(search);
+    });
+  }, [clients, filter]);
+
+  const { items: sortedClients, requestSort, getSortDirection } = useSortableData(filteredClients);
+
+  const renderSortIndicator = (key) => {
+    const dir = getSortDirection(key);
+    if (!dir) return <span className="sort-indicator">↕</span>;
+    return <span className="sort-indicator">{dir === 'asc' ? '↑' : '↓'}</span>;
+  };
 
   const fetchClients = async () => {
     try {
@@ -171,23 +190,15 @@ export default function Clients() {
           <thead>
             <tr>
               <th>Acciones</th>
-              <th>Nombre</th>
-              <th>Empresa</th>
-              <th>Email</th>
-              <th>Teléfono</th>
-              <th>Contacto</th>
+              <th className="sortable" onClick={() => requestSort('name')}>Nombre {renderSortIndicator('name')}</th>
+              <th className="sortable" onClick={() => requestSort('company_name')}>Empresa {renderSortIndicator('company_name')}</th>
+              <th className="sortable" onClick={() => requestSort('email')}>Email {renderSortIndicator('email')}</th>
+              <th className="sortable" onClick={() => requestSort('phone')}>Teléfono {renderSortIndicator('phone')}</th>
+              <th className="sortable" onClick={() => requestSort('contact_person')}>Contacto {renderSortIndicator('contact_person')}</th>
             </tr>
           </thead>
           <tbody>
-            {clients
-              .filter(client => {
-                if (!filter) return true;
-                const search = filter.toLowerCase();
-                return client.name?.toLowerCase().includes(search) ||
-                       client.company_name?.toLowerCase().includes(search) ||
-                       client.email?.toLowerCase().includes(search);
-              })
-              .map(client => (
+            {sortedClients.map(client => (
               <tr key={client.id}>
                 <td>
                   <div className="action-buttons">

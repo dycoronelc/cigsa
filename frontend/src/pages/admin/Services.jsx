@@ -1,20 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { EditIcon, DeleteIcon, SearchIcon } from '../../components/Icons';
 import { useAlert } from '../../hooks/useAlert';
+import { useSortableData } from '../../hooks/useSortableData';
 import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
 export default function Services() {
   const navigate = useNavigate();
-  const { alertDialog, showError, showConfirm, closeAlert } = useAlert();
+  const { alertDialog, showError, showSuccess, showConfirm, closeAlert } = useAlert();
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ 
-    code: '', 
     name: '', 
     description: '', 
     categoryId: '', 
@@ -47,6 +47,23 @@ export default function Services() {
     return service.category_name || service.category || '';
   };
 
+  const filteredServices = useMemo(() => {
+    return services.filter((service) => {
+      if (categoryFilter && getServiceCategoryLabel(service) !== categoryFilter) return false;
+      if (!filter) return true;
+      const search = filter.toLowerCase();
+      return service.code?.toLowerCase().includes(search) || service.name?.toLowerCase().includes(search);
+    });
+  }, [services, categoryFilter, filter]);
+
+  const { items: sortedServices, requestSort, getSortDirection } = useSortableData(filteredServices);
+
+  const renderSortIndicator = (key) => {
+    const dir = getSortDirection(key);
+    if (!dir) return <span className="sort-indicator">↕</span>;
+    return <span className="sort-indicator">{dir === 'asc' ? '↑' : '↓'}</span>;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -57,10 +74,13 @@ export default function Services() {
         standardPrice: formData.standardPrice ? parseFloat(formData.standardPrice) : null
       };
 
-      await api.post('/services', data);
+      const res = await api.post('/services', data);
       
       setShowModal(false);
-      setFormData({ code: '', name: '', description: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
+      setFormData({ name: '', description: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
+      if (res?.data?.code) {
+        showSuccess(`Servicio creado con código ${res.data.code}`);
+      }
       fetchServicesAndCategories();
     } catch (error) {
       showError(error.response?.data?.error || 'Error al guardar servicio');
@@ -84,7 +104,7 @@ export default function Services() {
 
   const handleCloseModal = () => {
     setShowModal(false);
-    setFormData({ code: '', name: '', description: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
+    setFormData({ name: '', description: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
   };
 
   if (loading) return <div className="loading">Cargando...</div>;
@@ -124,10 +144,9 @@ export default function Services() {
             <h2>Nuevo Servicio</h2>
             <form onSubmit={handleSubmit}>
               <input 
-                placeholder="Código (ej: SOLD-001)" 
-                value={formData.code} 
-                onChange={(e) => setFormData({...formData, code: e.target.value})} 
-                required 
+                placeholder="Código (se genera automáticamente)"
+                value="Automático (S####)"
+                disabled
               />
               <input 
                 placeholder="Nombre del Servicio" 
@@ -179,23 +198,15 @@ export default function Services() {
           <thead>
             <tr>
               <th>Acciones</th>
-              <th>Código</th>
-              <th>Nombre</th>
-              <th>Categoría</th>
-              <th>Duración (h)</th>
-              <th>Precio</th>
+              <th className="sortable" onClick={() => requestSort('code')}>Código {renderSortIndicator('code')}</th>
+              <th className="sortable" onClick={() => requestSort('name')}>Nombre {renderSortIndicator('name')}</th>
+              <th className="sortable" onClick={() => requestSort('category', (s) => getServiceCategoryLabel(s))}>Categoría {renderSortIndicator('category')}</th>
+              <th className="sortable" onClick={() => requestSort('estimated_duration')}>Duración (h) {renderSortIndicator('estimated_duration')}</th>
+              <th className="sortable" onClick={() => requestSort('standard_price')}>Precio {renderSortIndicator('standard_price')}</th>
             </tr>
           </thead>
           <tbody>
-            {services
-              .filter(service => {
-                if (categoryFilter && getServiceCategoryLabel(service) !== categoryFilter) return false;
-                if (!filter) return true;
-                const search = filter.toLowerCase();
-                return service.code?.toLowerCase().includes(search) ||
-                       service.name?.toLowerCase().includes(search);
-              })
-              .map(service => (
+            {sortedServices.map(service => (
               <tr key={service.id}>
                 <td>
                   <div className="action-buttons">

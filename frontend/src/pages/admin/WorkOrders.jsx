@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../services/api';
 import { ViewIcon } from '../../components/Icons';
+import { useSortableData } from '../../hooks/useSortableData';
 import './WorkOrders.css';
 
 export default function WorkOrders() {
@@ -51,6 +52,14 @@ export default function WorkOrders() {
     return true;
   });
 
+  const { items: sortedOrders, requestSort, getSortDirection } = useSortableData(filteredOrders);
+
+  const renderSortIndicator = (key) => {
+    const dir = getSortDirection(key);
+    if (!dir) return <span className="sort-indicator">↕</span>;
+    return <span className="sort-indicator">{dir === 'asc' ? '↑' : '↓'}</span>;
+  };
+
   if (loading) {
     return <div className="loading">Cargando...</div>;
   }
@@ -98,18 +107,19 @@ export default function WorkOrders() {
           <thead>
             <tr>
               <th>Acciones</th>
-              <th>Número</th>
-              <th>Título</th>
-              <th>Cliente</th>
-              <th>Equipo</th>
-              <th>Técnico</th>
-              <th>Estado</th>
-              <th>Prioridad</th>
-              <th>Fecha</th>
+              <th className="sortable" onClick={() => requestSort('order_number')}>Número {renderSortIndicator('order_number')}</th>
+              <th className="sortable" onClick={() => requestSort('title')}>Título {renderSortIndicator('title')}</th>
+              <th className="sortable" onClick={() => requestSort('client_name')}>Cliente {renderSortIndicator('client_name')}</th>
+              <th className="sortable" onClick={() => requestSort('equipment_name')}>Equipo {renderSortIndicator('equipment_name')}</th>
+              <th className="sortable" onClick={() => requestSort('technician_name')}>Técnico {renderSortIndicator('technician_name')}</th>
+              <th className="sortable" onClick={() => requestSort('client_service_order_number')}>N° OS Cliente {renderSortIndicator('client_service_order_number')}</th>
+              <th className="sortable" onClick={() => requestSort('status')}>Estado {renderSortIndicator('status')}</th>
+              <th className="sortable" onClick={() => requestSort('priority')}>Prioridad {renderSortIndicator('priority')}</th>
+              <th className="sortable" onClick={() => requestSort('created_at', (o) => new Date(o.created_at))}>Fecha {renderSortIndicator('created_at')}</th>
             </tr>
           </thead>
           <tbody>
-            {filteredOrders.map(order => {
+            {sortedOrders.map(order => {
               const statusBadge = getStatusBadge(order.status);
               const priorityBadge = getPriorityBadge(order.priority);
               
@@ -131,6 +141,7 @@ export default function WorkOrders() {
                   <td>{order.client_name}</td>
                   <td>{order.equipment_name}</td>
                   <td>{order.technician_name || <span className="badge badge-gray">Sin asignar</span>}</td>
+                  <td>{order.client_service_order_number || '-'}</td>
                   <td>
                     <span className={`badge ${statusBadge.class}`}>
                       {statusBadge.label}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../../services/api';
+import { useSortableData } from '../../hooks/useSortableData';
 import './Management.css';
 
 export default function Technicians() {
@@ -23,6 +24,14 @@ export default function Technicians() {
 
   if (loading) return <div className="loading">Cargando...</div>;
 
+  const { items: sortedTechnicians, requestSort, getSortDirection } = useSortableData(technicians);
+
+  const renderSortIndicator = (key) => {
+    const dir = getSortDirection(key);
+    if (!dir) return <span className="sort-indicator">↕</span>;
+    return <span className="sort-indicator">{dir === 'asc' ? '↑' : '↓'}</span>;
+  };
+
   return (
     <div className="management-page">
       <div className="page-header">
@@ -33,14 +42,14 @@ export default function Technicians() {
         <table className="data-table">
           <thead>
             <tr>
-              <th>Nombre</th>
-              <th>Usuario</th>
-              <th>Email</th>
-              <th>Teléfono</th>
+              <th className="sortable" onClick={() => requestSort('full_name')}>Nombre {renderSortIndicator('full_name')}</th>
+              <th className="sortable" onClick={() => requestSort('username')}>Usuario {renderSortIndicator('username')}</th>
+              <th className="sortable" onClick={() => requestSort('email')}>Email {renderSortIndicator('email')}</th>
+              <th className="sortable" onClick={() => requestSort('phone')}>Teléfono {renderSortIndicator('phone')}</th>
             </tr>
           </thead>
           <tbody>
-            {technicians.map(tech => (
+            {sortedTechnicians.map(tech => (
               <tr key={tech.id}>
                 <td>{tech.full_name}</td>
                 <td>{tech.username}</td>

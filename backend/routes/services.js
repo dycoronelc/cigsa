@@ -103,42 +103,74 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
   try {
     const { code, name, description, categoryId, category, estimatedDuration, standardPrice } = req.body;
 
-    if (!code || !name) {
-      return res.status(400).json({ error: 'Code and name are required' });
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
     }
 
     const pool = await getConnection();
-
-    // Check if code already exists
-    const [existing] = await pool.query('SELECT id FROM services WHERE code = ?', [code]);
-    if (existing.length > 0) {
-      return res.status(400).json({ error: 'Service code already exists' });
-    }
+    const conn = await pool.getConnection();
 
     const normalizedCategoryId = categoryId !== undefined && categoryId !== null && categoryId !== '' ? parseInt(categoryId) : null;
     const normalizedCategory = category !== undefined ? category : null;
+    let finalCode = typeof code === 'string' ? code.trim() : '';
 
-    const [result] = await pool.query(
-      `
-      INSERT INTO services (
-        code, name, description,
-        category_id, category,
-        estimated_duration, standard_price
-      ) VALUES (?, ?, ?, ?, COALESCE(?, (SELECT name FROM service_categories WHERE id = ?)), ?, ?)
-      `,
-      [
-        code,
-        name,
-        description || null,
-        normalizedCategoryId,
-        normalizedCategory || null,
-        normalizedCategoryId,
-        estimatedDuration || null,
-        standardPrice || null
-      ]
-    );
+    try {
+      await conn.beginTransaction();
 
-    res.status(201).json({ id: result.insertId, message: 'Service created successfully' });
+      // Auto-generate code if not provided: S#### (e.g. S0179)
+      if (!finalCode) {
+        const [rows] = await conn.query(
+          "SELECT code FROM services WHERE code REGEXP '^S[0-9]{4}$' ORDER BY CAST(SUBSTRING(code,2) AS UNSIGNED) DESC LIMIT 1 FOR UPDATE"
+        );
+        const lastCode = rows?.[0]?.code || 'S0000';
+        const lastNum = parseInt(String(lastCode).slice(1), 10) || 0;
+        const next = lastNum + 1;
+        if (next > 9999) {
+          await conn.rollback();
+          return res.status(400).json({ error: 'Service code limit reached (S9999)' });
+        }
+        finalCode = `S${String(next).padStart(4, '0')}`;
+      }
+
+      // Check if code already exists
+      const [existing] = await conn.query('SELECT id FROM services WHERE code = ? LIMIT 1', [finalCode]);
+      if (existing.length > 0) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'Service code already exists' });
+      }
+
+      const [result] = await conn.query(
+        `
+        INSERT INTO services (
+          code, name, description,
+          category_id, category,
+          estimated_duration, standard_price
+        ) VALUES (?, ?, ?, ?, COALESCE(?, (SELECT name FROM service_categories WHERE id = ?)), ?, ?)
+        `,
+        [
+          finalCode,
+          name,
+          description || null,
+          normalizedCategoryId,
+          normalizedCategory || null,
+          normalizedCategoryId,
+          estimatedDuration || null,
+          standardPrice || null
+        ]
+      );
+
+      await conn.commit();
+      res.status(201).json({ id: result.insertId, code: finalCode, message: 'Service created successfully' });
+    } catch (err) {
+      try {
+        await conn.rollback();
+      } catch (_) {
+        // ignore rollback errors
+      }
+      throw err;
+    } finally {
+      conn.release();
+    }
   } catch (error) {
     console.error('Create service error:', error);
     res.status(500).json({ error: 'Internal server error' });

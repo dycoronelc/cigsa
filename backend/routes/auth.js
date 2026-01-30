@@ -126,5 +126,43 @@ router.post('/change-password', authenticateToken, async (req, res) => {
   }
 });
 
+// Reset password (forgot password) - requires username + email
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { username, email, newPassword } = req.body;
+
+    if (!username || !email || !newPassword) {
+      return res.status(400).json({ error: 'Username, email and new password are required' });
+    }
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+
+    const pool = await getConnection();
+    const [users] = await pool.query(
+      'SELECT id, is_active FROM users WHERE username = ? AND email = ? LIMIT 1',
+      [username, email]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'Usuario y correo no coinciden' });
+    }
+
+    if (!users[0].is_active) {
+      return res.status(403).json({ error: 'Account is deactivated' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hashedPassword, users[0].id]);
+
+    await logActivity(users[0].id, 'RESET_PASSWORD', 'user', users[0].id, 'Password reset', req.ip);
+
+    res.json({ message: 'Password reset successfully' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
 

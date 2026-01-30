@@ -4,6 +4,7 @@ import api from '../../services/api';
 import { getStaticUrl } from '../../config.js';
 import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
+import SearchableSelect from '../../components/SearchableSelect';
 import './WorkOrderDetail.css';
 
 export default function WorkOrderDetail() {
@@ -14,10 +15,58 @@ export default function WorkOrderDetail() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('details');
   const [expandedPhoto, setExpandedPhoto] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editData, setEditData] = useState({
+    title: '',
+    equipmentId: '',
+    serviceLocation: '',
+    clientServiceOrderNumber: '',
+    priority: 'medium',
+    scheduledDate: '',
+    assignedTechnicianId: '',
+    serviceId: '',
+    description: ''
+  });
+  const [services, setServices] = useState([]);
+  const [technicians, setTechnicians] = useState([]);
+  const [equipmentOptions, setEquipmentOptions] = useState([]);
 
   useEffect(() => {
     fetchOrder();
   }, [id]);
+
+  useEffect(() => {
+    const fetchEquipmentByClient = async () => {
+      if (!order?.client_id) return;
+      try {
+        const res = await api.get(`/equipment?clientId=${order.client_id}`);
+        setEquipmentOptions(res.data || []);
+      } catch (error) {
+        console.error('Error fetching equipment for client:', error);
+        setEquipmentOptions([]);
+      }
+    };
+    fetchEquipmentByClient();
+  }, [order?.client_id]);
+
+  useEffect(() => {
+    // lookups for editable selects
+    const fetchLookups = async () => {
+      try {
+        const [servicesRes, techRes] = await Promise.all([
+          api.get('/services'),
+          api.get('/technicians')
+        ]);
+        setServices(servicesRes.data || []);
+        setTechnicians(techRes.data || []);
+      } catch (error) {
+        // non-blocking
+        console.error('Error fetching lookups:', error);
+      }
+    };
+    fetchLookups();
+  }, []);
 
   useEffect(() => {
     if (!expandedPhoto) return;
@@ -34,6 +83,91 @@ export default function WorkOrderDetail() {
       console.error('Error fetching work order:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const toDateInputValue = (value) => {
+    if (!value) return '';
+    try {
+      if (typeof value === 'string') return value.split('T')[0];
+      // fallback
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+    } catch (_) {
+      return '';
+    }
+  };
+
+  const startEdit = () => {
+    if (!order) return;
+    setEditData({
+      title: order.title || '',
+      equipmentId: order.equipment_id ? String(order.equipment_id) : '',
+      serviceLocation: order.service_location || '',
+      clientServiceOrderNumber: order.client_service_order_number || '',
+      priority: order.priority || 'medium',
+      scheduledDate: toDateInputValue(order.scheduled_date),
+      assignedTechnicianId: order.assigned_technician_id ? String(order.assigned_technician_id) : '',
+      serviceId: order.service_id ? String(order.service_id) : '',
+      description: order.description || ''
+    });
+    setEditMode(true);
+  };
+
+  const cancelEdit = () => {
+    setEditMode(false);
+    setSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!order) return;
+    const payload = {};
+
+    if (editData.title !== (order.title || '')) payload.title = editData.title;
+    const currentEquipmentId = order.equipment_id ? String(order.equipment_id) : '';
+    if (editData.equipmentId !== currentEquipmentId) {
+      payload.equipmentId = editData.equipmentId ? parseInt(editData.equipmentId) : null;
+    }
+    if (editData.serviceLocation !== (order.service_location || '')) payload.serviceLocation = editData.serviceLocation;
+    if (editData.clientServiceOrderNumber !== (order.client_service_order_number || '')) {
+      payload.clientServiceOrderNumber = editData.clientServiceOrderNumber;
+    }
+    if (editData.priority !== (order.priority || 'medium')) payload.priority = editData.priority;
+
+    const currentScheduled = toDateInputValue(order.scheduled_date);
+    if (editData.scheduledDate !== currentScheduled) {
+      payload.scheduledDate = editData.scheduledDate || null;
+    }
+
+    const currentAssigned = order.assigned_technician_id ? String(order.assigned_technician_id) : '';
+    if (editData.assignedTechnicianId !== currentAssigned) {
+      payload.assignedTechnicianId = editData.assignedTechnicianId ? parseInt(editData.assignedTechnicianId) : null;
+    }
+
+    const currentServiceId = order.service_id ? String(order.service_id) : '';
+    if (editData.serviceId !== currentServiceId) {
+      payload.serviceId = editData.serviceId ? parseInt(editData.serviceId) : null;
+    }
+
+    if (editData.description !== (order.description || '')) payload.description = editData.description;
+
+    if (Object.keys(payload).length === 0) {
+      showSuccess('No hay cambios para guardar');
+      setEditMode(false);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await api.put(`/work-orders/${id}`, payload);
+      showSuccess('Orden actualizada');
+      setEditMode(false);
+      fetchOrder();
+    } catch (error) {
+      console.error('Error saving work order:', error);
+      showError(error.response?.data?.error || 'Error al guardar cambios');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -117,6 +251,22 @@ export default function WorkOrderDetail() {
           <h1>{order.order_number}</h1>
           <p>{order.title}</p>
         </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          {!editMode ? (
+            <button type="button" className="btn-primary" onClick={startEdit}>
+              Editar
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn-secondary" onClick={cancelEdit} disabled={saving}>
+                Cancelar
+              </button>
+              <button type="button" className="btn-primary" onClick={saveEdit} disabled={saving}>
+                {saving ? 'Guardando...' : 'Guardar'}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="detail-tabs">
@@ -178,44 +328,128 @@ export default function WorkOrderDetail() {
 
               <div className="info-item">
                 <label>Equipo</label>
-                <p>{order.equipment_name}</p>
+                {editMode ? (
+                  <SearchableSelect
+                    value={editData.equipmentId}
+                    onChange={(val) => setEditData({ ...editData, equipmentId: val })}
+                    options={equipmentOptions.map((eq) => ({
+                      value: String(eq.id),
+                      label: `${eq.brand_name} ${eq.model_name} - ${eq.serial_number}${eq.client_name ? ` (${eq.client_name})` : ''}`
+                    }))}
+                    placeholder="Escriba para buscar equipo..."
+                    disabled={!order?.client_id}
+                  />
+                ) : (
+                  <p>{order.equipment_name}</p>
+                )}
               </div>
 
               <div className="info-item">
                 <label>Ubicación del Servicio</label>
-                <p>{order.service_location || 'No especificada'}</p>
+                {editMode ? (
+                  <input
+                    value={editData.serviceLocation}
+                    onChange={(e) => setEditData({ ...editData, serviceLocation: e.target.value })}
+                    placeholder="Ubicación del servicio"
+                  />
+                ) : (
+                  <p>{order.service_location || 'No especificada'}</p>
+                )}
+              </div>
+
+              <div className="info-item">
+                <label>N° Orden de Servicio del Cliente</label>
+                {editMode ? (
+                  <input
+                    value={editData.clientServiceOrderNumber}
+                    onChange={(e) => setEditData({ ...editData, clientServiceOrderNumber: e.target.value })}
+                    placeholder="Ej: OS-12345"
+                  />
+                ) : (
+                  <p>{order.client_service_order_number || '-'}</p>
+                )}
               </div>
 
               <div className="info-item">
                 <label>Técnico Asignado</label>
-                <p>{order.technician_name || 'Sin asignar'}</p>
+                {editMode ? (
+                  <select
+                    value={editData.assignedTechnicianId}
+                    onChange={(e) => setEditData({ ...editData, assignedTechnicianId: e.target.value })}
+                  >
+                    <option value="">Sin asignar</option>
+                    {technicians.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.full_name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p>{order.technician_name || 'Sin asignar'}</p>
+                )}
               </div>
 
               <div className="info-item">
                 <label>Prioridad</label>
-                <p>{order.priority === 'low' ? 'Baja' : 
-                    order.priority === 'medium' ? 'Media' : 
-                    order.priority === 'high' ? 'Alta' : 'Urgente'}</p>
+                {editMode ? (
+                  <select
+                    value={editData.priority}
+                    onChange={(e) => setEditData({ ...editData, priority: e.target.value })}
+                  >
+                    <option value="low">Baja</option>
+                    <option value="medium">Media</option>
+                    <option value="high">Alta</option>
+                    <option value="urgent">Urgente</option>
+                  </select>
+                ) : (
+                  <p>{order.priority === 'low' ? 'Baja' :
+                      order.priority === 'medium' ? 'Media' :
+                      order.priority === 'high' ? 'Alta' : 'Urgente'}</p>
+                )}
               </div>
 
               <div className="info-item">
                 <label>Fecha Programada</label>
-                <p>{order.scheduled_date 
-                  ? (() => {
-                      try {
-                        const dateStr = typeof order.scheduled_date === 'string' 
-                          ? order.scheduled_date.split('T')[0]
-                          : order.scheduled_date;
-                        return new Date(dateStr + 'T00:00:00').toLocaleDateString('es-PA', { 
-                          year: 'numeric', 
-                          month: 'long', 
-                          day: 'numeric' 
-                        });
-                      } catch (error) {
-                        return order.scheduled_date;
-                      }
-                    })()
-                  : 'No programada'}</p>
+                {editMode ? (
+                  <input
+                    type="date"
+                    value={editData.scheduledDate}
+                    onChange={(e) => setEditData({ ...editData, scheduledDate: e.target.value })}
+                  />
+                ) : (
+                  <p>{order.scheduled_date
+                    ? (() => {
+                        try {
+                          const dateStr = typeof order.scheduled_date === 'string'
+                            ? order.scheduled_date.split('T')[0]
+                            : order.scheduled_date;
+                          return new Date(dateStr + 'T00:00:00').toLocaleDateString('es-PA', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          });
+                        } catch (error) {
+                          return order.scheduled_date;
+                        }
+                      })()
+                    : 'No programada'}</p>
+                )}
+              </div>
+
+              <div className="info-item">
+                <label>Servicio</label>
+                {editMode ? (
+                  <SearchableSelect
+                    value={editData.serviceId}
+                    onChange={(val) => setEditData({ ...editData, serviceId: val })}
+                    options={services.map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
+                    placeholder="Escriba para buscar servicio..."
+                    allowClear
+                    clearLabel="(Opcional) Sin servicio"
+                  />
+                ) : (
+                  <p>{order.service_name ? `${order.service_code || ''} ${order.service_name}`.trim() : '-'}</p>
+                )}
               </div>
 
               <div className="info-item">
@@ -249,7 +483,16 @@ export default function WorkOrderDetail() {
 
             <div className="description-section">
               <label>Descripción</label>
-              <p>{order.description || 'Sin descripción'}</p>
+              {editMode ? (
+                <textarea
+                  value={editData.description}
+                  onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                  rows={4}
+                  placeholder="Descripción"
+                />
+              ) : (
+                <p>{order.description || 'Sin descripción'}</p>
+              )}
             </div>
           </div>
         )}

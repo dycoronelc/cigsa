@@ -275,7 +275,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create work order
 router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'work_order'), async (req, res) => {
   try {
-    const { clientId, equipmentId, serviceId, serviceLocation, serviceHousings, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
+    const { clientId, equipmentId, serviceId, serviceLocation, clientServiceOrderNumber, serviceHousings, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
     
     if (!clientId || !equipmentId || !title) {
       return res.status(400).json({ error: 'Client, equipment, and title are required' });
@@ -289,14 +289,15 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
     
     const [result] = await pool.query(
       `INSERT INTO work_orders 
-       (order_number, client_id, equipment_id, service_id, service_location, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (order_number, client_id, equipment_id, service_id, service_location, client_service_order_number, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         orderNumber,
         clientId,
         equipmentId,
         serviceId || null,
         serviceLocation || null,
+        clientServiceOrderNumber || null,
         Array.isArray(serviceHousings) ? serviceHousings.length : 0,
         assignedTechnicianId || null,
         title,
@@ -343,7 +344,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
 // Update work order
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { title, description, priority, scheduledDate, assignedTechnicianId, status, serviceLocation, serviceId } = req.body;
+    const { title, description, priority, scheduledDate, assignedTechnicianId, status, serviceLocation, serviceId, clientServiceOrderNumber, equipmentId } = req.body;
     const pool = await getConnection();
     
     // Check permissions
@@ -410,6 +411,26 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (serviceLocation !== undefined) {
       updateFields.push('service_location = ?');
       updateValues.push(serviceLocation || null);
+    }
+    if (equipmentId !== undefined) {
+      const nextEquipmentId = equipmentId ? parseInt(equipmentId) : null;
+      if (!nextEquipmentId) {
+        return res.status(400).json({ error: 'Equipo es requerido' });
+      }
+      // Validate equipment belongs to same client for this work order (safety)
+      const [eqRows] = await pool.query('SELECT id, client_id FROM equipment WHERE id = ? LIMIT 1', [nextEquipmentId]);
+      if (eqRows.length === 0) {
+        return res.status(404).json({ error: 'Equipo no encontrado' });
+      }
+      if (order.client_id && eqRows[0].client_id && Number(eqRows[0].client_id) !== Number(order.client_id)) {
+        return res.status(400).json({ error: 'El equipo seleccionado no pertenece al cliente de esta OT' });
+      }
+      updateFields.push('equipment_id = ?');
+      updateValues.push(nextEquipmentId);
+    }
+    if (clientServiceOrderNumber !== undefined) {
+      updateFields.push('client_service_order_number = ?');
+      updateValues.push(clientServiceOrderNumber || null);
     }
     if (scheduledDate !== undefined) {
       updateFields.push('scheduled_date = ?');
@@ -712,26 +733,92 @@ router.put('/:id/documents/permissions', authenticateToken, requireRole('admin')
   try {
     const { documentPermissions } = req.body; // Array of { documentId, isVisibleToTechnician }
     const pool = await getConnection();
+    const conn = await pool.getConnection();
     
-    // Verify work order exists
-    const [orders] = await pool.query('SELECT id FROM work_orders WHERE id = ?', [req.params.id]);
-    if (orders.length === 0) {
-      return res.status(404).json({ error: 'Work order not found' });
+    try {
+      await conn.beginTransaction();
+
+      // Verify work order exists (and grab equipment_id for linking equipment documents if needed)
+      const [orders] = await conn.query('SELECT id, equipment_id FROM work_orders WHERE id = ?', [req.params.id]);
+      if (orders.length === 0) {
+        await conn.rollback();
+        return res.status(404).json({ error: 'Work order not found' });
+      }
+      const workOrder = orders[0];
+
+      // Delete existing permissions for this work order
+      await conn.query('DELETE FROM work_order_document_permissions WHERE work_order_id = ?', [req.params.id]);
+
+      // Insert new permissions
+      if (documentPermissions && documentPermissions.length > 0) {
+        const values = [];
+
+        for (const dp of documentPermissions) {
+          if (!dp) continue;
+          let documentId = dp.documentId;
+          const isVisible = dp.isVisibleToTechnician ? 1 : 0;
+
+          // Allow equipment docs IDs in the form "equip_123"
+          if (typeof documentId === 'string' && documentId.startsWith('equip_')) {
+            const equipmentDocumentId = parseInt(documentId.replace('equip_', ''), 10);
+            if (!Number.isFinite(equipmentDocumentId)) continue;
+
+            // Find or create a work_order_documents row linked to this equipment_document_id
+            const [existingWod] = await conn.query(
+              'SELECT id FROM work_order_documents WHERE work_order_id = ? AND equipment_document_id = ? LIMIT 1',
+              [req.params.id, equipmentDocumentId]
+            );
+            if (existingWod.length > 0) {
+              documentId = existingWod[0].id;
+            } else {
+              const [equipDocs] = await conn.query(
+                'SELECT document_type, file_path, file_name, file_size, mime_type, description, uploaded_by FROM equipment_documents WHERE id = ? LIMIT 1',
+                [equipmentDocumentId]
+              );
+              if (equipDocs.length === 0) continue;
+              const ed = equipDocs[0];
+              const [ins] = await conn.query(
+                `INSERT INTO work_order_documents
+                  (work_order_id, equipment_id, equipment_document_id, document_type, file_path, file_name, file_size, mime_type, description, uploaded_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  req.params.id,
+                  workOrder.equipment_id || null,
+                  equipmentDocumentId,
+                  ed.document_type || 'other',
+                  ed.file_path,
+                  ed.file_name,
+                  ed.file_size || null,
+                  ed.mime_type || null,
+                  ed.description || null,
+                  ed.uploaded_by || null
+                ]
+              );
+              documentId = ins.insertId;
+            }
+          }
+
+          const numericId = typeof documentId === 'number' ? documentId : parseInt(documentId, 10);
+          if (!Number.isFinite(numericId)) continue;
+          values.push([req.params.id, numericId, isVisible]);
+        }
+
+        if (values.length > 0) {
+          await conn.query(
+            'INSERT INTO work_order_document_permissions (work_order_id, document_id, is_visible_to_technician) VALUES ?',
+            [values]
+          );
+        }
+      }
+
+      await conn.commit();
+      res.json({ message: 'Document permissions updated successfully' });
+    } catch (err) {
+      try { await conn.rollback(); } catch (_) { /* ignore */ }
+      throw err;
+    } finally {
+      conn.release();
     }
-    
-    // Delete existing permissions for this work order
-    await pool.query('DELETE FROM work_order_document_permissions WHERE work_order_id = ?', [req.params.id]);
-    
-    // Insert new permissions
-    if (documentPermissions && documentPermissions.length > 0) {
-      const values = documentPermissions.map(dp => [req.params.id, dp.documentId, dp.isVisibleToTechnician ? 1 : 0]);
-      await pool.query(
-        'INSERT INTO work_order_document_permissions (work_order_id, document_id, is_visible_to_technician) VALUES ?',
-        [values]
-      );
-    }
-    
-    res.json({ message: 'Document permissions updated successfully' });
   } catch (error) {
     console.error('Update document permissions error:', error);
     res.status(500).json({ error: 'Internal server error' });

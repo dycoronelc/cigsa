@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import api from '../../services/api';
 import { EditIcon, SearchIcon } from '../../components/Icons';
 import { useAlert } from '../../hooks/useAlert';
+import { useSortableData } from '../../hooks/useSortableData';
 import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
@@ -27,6 +28,25 @@ export default function Users() {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      if (roleFilter && user.role !== roleFilter) return false;
+      if (!filter) return true;
+      const search = filter.toLowerCase();
+      return user.username?.toLowerCase().includes(search) ||
+             user.full_name?.toLowerCase().includes(search) ||
+             user.email?.toLowerCase().includes(search);
+    });
+  }, [users, roleFilter, filter]);
+
+  const { items: sortedUsers, requestSort, getSortDirection } = useSortableData(filteredUsers);
+
+  const renderSortIndicator = (key) => {
+    const dir = getSortDirection(key);
+    if (!dir) return <span className="sort-indicator">↕</span>;
+    return <span className="sort-indicator">{dir === 'asc' ? '↑' : '↓'}</span>;
+  };
 
   const fetchUsers = async () => {
     try {
@@ -189,24 +209,15 @@ export default function Users() {
           <thead>
             <tr>
               <th>Acciones</th>
-              <th>Usuario</th>
-              <th>Nombre</th>
-              <th>Email</th>
-              <th>Rol</th>
-              <th>Estado</th>
+              <th className="sortable" onClick={() => requestSort('username')}>Usuario {renderSortIndicator('username')}</th>
+              <th className="sortable" onClick={() => requestSort('full_name')}>Nombre {renderSortIndicator('full_name')}</th>
+              <th className="sortable" onClick={() => requestSort('email')}>Email {renderSortIndicator('email')}</th>
+              <th className="sortable" onClick={() => requestSort('role')}>Rol {renderSortIndicator('role')}</th>
+              <th className="sortable" onClick={() => requestSort('is_active')}>Estado {renderSortIndicator('is_active')}</th>
             </tr>
           </thead>
           <tbody>
-            {users
-              .filter(user => {
-                if (roleFilter && user.role !== roleFilter) return false;
-                if (!filter) return true;
-                const search = filter.toLowerCase();
-                return user.username?.toLowerCase().includes(search) ||
-                       user.full_name?.toLowerCase().includes(search) ||
-                       user.email?.toLowerCase().includes(search);
-              })
-              .map(user => (
+            {sortedUsers.map(user => (
               <tr key={user.id}>
                 <td>
                   <div className="action-buttons">

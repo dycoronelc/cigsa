@@ -41,6 +41,24 @@ button {
   cursor: pointer;
 }
 
+/* Sortable table headers (used across admin/technician tables) */
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.data-table th.sortable:hover {
+  color: #2d2c3f;
+}
+
+.sort-indicator {
+  display: inline-block;
+  width: 1.1em;
+  text-align: center;
+  opacity: 0.7;
+  font-weight: 700;
+}
+
 input, textarea, select {
   font-family: inherit;
 }

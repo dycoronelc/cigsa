@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS work_orders (
   equipment_id INT NOT NULL,
   service_id INT,
   service_location VARCHAR(100),
+  client_service_order_number VARCHAR(50) COMMENT 'N° Orden de Servicio del Cliente',
   service_housing_count INT DEFAULT 0,
   assigned_technician_id INT,
   title VARCHAR(200) NOT NULL,
@@ -136,6 +137,9 @@ CREATE TABLE IF NOT EXISTS work_orders (
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- Migration-safe: add column if table already exists (duplicate column errors are ignored by initDatabase)
+ALTER TABLE work_orders ADD COLUMN client_service_order_number VARCHAR(50) NULL COMMENT 'N° Orden de Servicio del Cliente';
 
 -- Work Order Service Housings (Alojamientos intervenidos en la OT)
 CREATE TABLE IF NOT EXISTS work_order_housings (

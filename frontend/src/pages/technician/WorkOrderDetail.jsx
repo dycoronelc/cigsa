@@ -308,6 +308,10 @@ export default function TechnicianWorkOrderDetail() {
               <p>{order.service_location || 'No especificada'}</p>
             </div>
             <div className="info-item">
+              <label>N° Orden de Servicio del Cliente</label>
+              <p>{order.client_service_order_number || '-'}</p>
+            </div>
+            <div className="info-item">
               <label>Fecha de Inicio</label>
               <p>{order.start_date 
                 ? new Date(order.start_date).toLocaleString('es-PA')
