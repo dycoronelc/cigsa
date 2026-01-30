@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import api from '../../services/api';
 import { getStaticUrl } from '../../config.js';
 import { EditIcon, DeleteIcon, SearchIcon } from '../../components/Icons';
 import { useAlert } from '../../hooks/useAlert';
+import { useSortableData } from '../../hooks/useSortableData';
 import AlertDialog from '../../components/AlertDialog';
 import './Management.css';
 
@@ -364,6 +365,53 @@ export default function Equipment() {
     });
   };
 
+  const renderSortIndicator = (getDir, key) => {
+    const dir = getDir(key);
+    if (!dir) return <span className="sort-indicator">↕</span>;
+    return <span className="sort-indicator">{dir === 'asc' ? '↑' : '↓'}</span>;
+  };
+
+  const filteredBrands = useMemo(() => {
+    return brands.filter((brand) => !brandFilter || brand.name.toLowerCase().includes(brandFilter.toLowerCase()));
+  }, [brands, brandFilter]);
+
+  const filteredModels = useMemo(() => {
+    return models.filter((model) => {
+      if (selectedBrandId && model.brand_id !== parseInt(selectedBrandId)) return false;
+      if (modelFilter && !model.model_name.toLowerCase().includes(modelFilter.toLowerCase())) return false;
+      return true;
+    });
+  }, [models, selectedBrandId, modelFilter]);
+
+  const filteredEquipment = useMemo(() => {
+    return equipment.filter((item) => {
+      if (!equipmentFilter) return true;
+      const search = equipmentFilter.toLowerCase();
+      return item.serial_number?.toLowerCase().includes(search) ||
+             item.brand_name?.toLowerCase().includes(search) ||
+             item.model_name?.toLowerCase().includes(search);
+    });
+  }, [equipment, equipmentFilter]);
+
+  const filteredHousings = useMemo(() => {
+    return housings.filter((housing) => {
+      if (selectedModelIdForHousing && housing.model_id !== parseInt(selectedModelIdForHousing)) return false;
+      if (!housingFilter) return true;
+      const search = housingFilter.toLowerCase();
+      return housing.housing_name?.toLowerCase().includes(search) ||
+             housing.brand_name?.toLowerCase().includes(search) ||
+             housing.model_name?.toLowerCase().includes(search);
+    });
+  }, [housings, housingFilter, selectedModelIdForHousing]);
+
+  const filteredDocuments = useMemo(() => equipmentDocuments, [equipmentDocuments]);
+
+  const { items: sortedBrands, requestSort: requestSortBrands, getSortDirection: getBrandDir } = useSortableData(filteredBrands);
+  const { items: sortedModels, requestSort: requestSortModels, getSortDirection: getModelDir } = useSortableData(filteredModels);
+  const { items: sortedHousings, requestSort: requestSortHousings, getSortDirection: getHousingDir } = useSortableData(filteredHousings);
+  const { items: sortedEquipment, requestSort: requestSortEquipment, getSortDirection: getEquipmentDir } = useSortableData(filteredEquipment);
+  const { items: sortedDocuments, requestSort: requestSortDocs, getSortDirection: getDocDir } = useSortableData(filteredDocuments);
+
   if (loading) return <div className="loading">Cargando...</div>;
 
   return (
@@ -432,15 +480,13 @@ export default function Equipment() {
               <thead>
                 <tr>
                   <th>Acciones</th>
-                  <th>ID</th>
-                  <th>Nombre</th>
-                  <th>Estado</th>
+                  <th className="sortable" onClick={() => requestSortBrands('id')}>ID {renderSortIndicator(getBrandDir, 'id')}</th>
+                  <th className="sortable" onClick={() => requestSortBrands('name')}>Nombre {renderSortIndicator(getBrandDir, 'name')}</th>
+                  <th className="sortable" onClick={() => requestSortBrands('is_active')}>Estado {renderSortIndicator(getBrandDir, 'is_active')}</th>
                 </tr>
               </thead>
               <tbody>
-                {brands
-                  .filter(brand => !brandFilter || brand.name.toLowerCase().includes(brandFilter.toLowerCase()))
-                  .map(brand => (
+                {sortedBrands.map(brand => (
                   <tr key={brand.id}>
                     <td>
                       <div className="action-buttons">
@@ -503,21 +549,15 @@ export default function Equipment() {
               <thead>
                 <tr>
                   <th>Acciones</th>
-                  <th>ID</th>
-                  <th>Marca</th>
-                  <th>Modelo</th>
-                  <th>Componentes</th>
-                  <th>Estado</th>
+                  <th className="sortable" onClick={() => requestSortModels('id')}>ID {renderSortIndicator(getModelDir, 'id')}</th>
+                  <th className="sortable" onClick={() => requestSortModels('brand_name')}>Marca {renderSortIndicator(getModelDir, 'brand_name')}</th>
+                  <th className="sortable" onClick={() => requestSortModels('model_name')}>Modelo {renderSortIndicator(getModelDir, 'model_name')}</th>
+                  <th className="sortable" onClick={() => requestSortModels('components')}>Componentes {renderSortIndicator(getModelDir, 'components')}</th>
+                  <th className="sortable" onClick={() => requestSortModels('is_active')}>Estado {renderSortIndicator(getModelDir, 'is_active')}</th>
                 </tr>
               </thead>
               <tbody>
-                {models
-                  .filter(model => {
-                    if (selectedBrandId && model.brand_id !== parseInt(selectedBrandId)) return false;
-                    if (modelFilter && !model.model_name.toLowerCase().includes(modelFilter.toLowerCase())) return false;
-                    return true;
-                  })
-                  .map(model => (
+                {sortedModels.map(model => (
                   <tr key={model.id}>
                     <td>
                       <div className="action-buttons">
@@ -573,23 +613,15 @@ export default function Equipment() {
               <thead>
                 <tr>
                   <th>Acciones</th>
-                  <th>Serial</th>
-                  <th>Marca</th>
-                  <th>Modelo</th>
-                  <th>Componentes</th>
-                  <th>Cliente</th>
+                  <th className="sortable" onClick={() => requestSortEquipment('serial_number')}>Serial {renderSortIndicator(getEquipmentDir, 'serial_number')}</th>
+                  <th className="sortable" onClick={() => requestSortEquipment('brand_name')}>Marca {renderSortIndicator(getEquipmentDir, 'brand_name')}</th>
+                  <th className="sortable" onClick={() => requestSortEquipment('model_name')}>Modelo {renderSortIndicator(getEquipmentDir, 'model_name')}</th>
+                  <th className="sortable" onClick={() => requestSortEquipment('components')}>Componentes {renderSortIndicator(getEquipmentDir, 'components')}</th>
+                  <th className="sortable" onClick={() => requestSortEquipment('client_name')}>Cliente {renderSortIndicator(getEquipmentDir, 'client_name')}</th>
                 </tr>
               </thead>
               <tbody>
-                {equipment
-                  .filter(item => {
-                    if (!equipmentFilter) return true;
-                    const search = equipmentFilter.toLowerCase();
-                    return item.serial_number?.toLowerCase().includes(search) ||
-                           item.brand_name?.toLowerCase().includes(search) ||
-                           item.model_name?.toLowerCase().includes(search);
-                  })
-                  .map(item => (
+                {sortedEquipment.map(item => (
                   <tr key={item.id}>
                     <td>
                       <div className="action-buttons">
@@ -657,22 +689,14 @@ export default function Equipment() {
               <thead>
                 <tr>
                   <th>Acciones</th>
-                  <th>Marca</th>
-                  <th>Modelo</th>
-                  <th>Alojamiento</th>
-                  <th>Descripción</th>
+                  <th className="sortable" onClick={() => requestSortHousings('brand_name')}>Marca {renderSortIndicator(getHousingDir, 'brand_name')}</th>
+                  <th className="sortable" onClick={() => requestSortHousings('model_name')}>Modelo {renderSortIndicator(getHousingDir, 'model_name')}</th>
+                  <th className="sortable" onClick={() => requestSortHousings('housing_name')}>Alojamiento {renderSortIndicator(getHousingDir, 'housing_name')}</th>
+                  <th className="sortable" onClick={() => requestSortHousings('description')}>Descripción {renderSortIndicator(getHousingDir, 'description')}</th>
                 </tr>
               </thead>
               <tbody>
-                {housings
-                  .filter(housing => {
-                    if (!housingFilter) return true;
-                    const search = housingFilter.toLowerCase();
-                    return housing.housing_name?.toLowerCase().includes(search) ||
-                           housing.brand_name?.toLowerCase().includes(search) ||
-                           housing.model_name?.toLowerCase().includes(search);
-                  })
-                  .map(housing => (
+                {sortedHousings.map(housing => (
                     <tr key={housing.id}>
                       <td>
                         <div className="action-buttons">
@@ -715,17 +739,17 @@ export default function Equipment() {
               <thead>
                 <tr>
                   <th>Acciones</th>
-                  <th>Archivo</th>
-                  <th>Tipo</th>
-                  <th>Marca</th>
-                  <th>Modelo</th>
-                  <th>Alojamiento</th>
-                  <th>Descripción</th>
-                  <th>Tamaño</th>
+                  <th className="sortable" onClick={() => requestSortDocs('file_name')}>Archivo {renderSortIndicator(getDocDir, 'file_name')}</th>
+                  <th className="sortable" onClick={() => requestSortDocs('document_type')}>Tipo {renderSortIndicator(getDocDir, 'document_type')}</th>
+                  <th className="sortable" onClick={() => requestSortDocs('brand_name')}>Marca {renderSortIndicator(getDocDir, 'brand_name')}</th>
+                  <th className="sortable" onClick={() => requestSortDocs('model_name')}>Modelo {renderSortIndicator(getDocDir, 'model_name')}</th>
+                  <th className="sortable" onClick={() => requestSortDocs('housing_name')}>Alojamiento {renderSortIndicator(getDocDir, 'housing_name')}</th>
+                  <th className="sortable" onClick={() => requestSortDocs('description')}>Descripción {renderSortIndicator(getDocDir, 'description')}</th>
+                  <th className="sortable" onClick={() => requestSortDocs('file_size')}>Tamaño {renderSortIndicator(getDocDir, 'file_size')}</th>
                 </tr>
               </thead>
               <tbody>
-                {equipmentDocuments.map(doc => (
+                {sortedDocuments.map(doc => (
                   <tr key={doc.id}>
                     <td>
                       <div className="action-buttons">

@@ -22,8 +22,6 @@ export default function ActivityLog() {
     }
   };
 
-  if (loading) return <div className="loading">Cargando...</div>;
-
   const { items: sortedLogs, requestSort, getSortDirection } = useSortableData(logs);
 
   const renderSortIndicator = (key) => {
@@ -31,6 +29,8 @@ export default function ActivityLog() {
     if (!dir) return <span className="sort-indicator">↕</span>;
     return <span className="sort-indicator">{dir === 'asc' ? '↑' : '↓'}</span>;
   };
+
+  if (loading) return <div className="loading">Cargando...</div>;
 
   return (
     <div className="management-page">
