@@ -153,11 +153,12 @@ CREATE TABLE IF NOT EXISTS work_order_services (
   UNIQUE KEY unique_work_order_service (work_order_id, service_id)
 );
 
--- Work Order Service Housings (Alojamientos intervenidos en la OT)
+-- Work Order Service Housings (Alojamientos intervenidos en la OT, por servicio - cada servicio tiene A, B, C...)
 CREATE TABLE IF NOT EXISTS work_order_housings (
   id INT PRIMARY KEY AUTO_INCREMENT,
   work_order_id INT NOT NULL,
-  measure_code VARCHAR(10) NOT NULL COMMENT 'Correlativo tipo A, B, C... por OT',
+  work_order_service_id INT NULL COMMENT 'Servicio al que pertenece; NULL para legacy',
+  measure_code VARCHAR(10) NOT NULL COMMENT 'Correlativo A, B, C... por servicio (cada servicio empieza en A)',
   description TEXT,
   nominal_value DECIMAL(10, 3),
   nominal_unit VARCHAR(20),
@@ -165,7 +166,8 @@ CREATE TABLE IF NOT EXISTS work_order_housings (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
-  UNIQUE KEY unique_work_order_measure_code (work_order_id, measure_code)
+  FOREIGN KEY (work_order_service_id) REFERENCES work_order_services(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_work_order_service_measure (work_order_service_id, measure_code)
 );
 
 -- Measurements per housing (X1/Y1 + unidad) linked to a measurement event (initial/final)

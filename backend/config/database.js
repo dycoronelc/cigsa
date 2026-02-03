@@ -257,6 +257,72 @@ export const initDatabase = async () => {
       }
     }
 
+    // Add work_order_service_id to work_order_housings (alojamientos por servicio)
+    const dbName = process.env.DB_NAME || 'cigsa_db';
+    try {
+      const [wosCol] = await pool.query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_order_housings' AND COLUMN_NAME = 'work_order_service_id'
+      `, [dbName]);
+      if (wosCol.length === 0) {
+        await pool.query('ALTER TABLE work_order_housings ADD COLUMN work_order_service_id INT NULL AFTER work_order_id');
+        try {
+          await pool.query('ALTER TABLE work_order_housings ADD CONSTRAINT woh_fk_wos FOREIGN KEY (work_order_service_id) REFERENCES work_order_services(id) ON DELETE CASCADE');
+        } catch (fkErr) {
+          if (!fkErr.sqlMessage?.includes('Duplicate')) console.warn('FK work_order_service_id:', fkErr.message);
+        }
+        // Migrar housings legacy: asignar a work_order_services
+        const [legacyWoIds] = await pool.query(`
+          SELECT DISTINCT work_order_id FROM work_order_housings WHERE work_order_service_id IS NULL
+        `);
+        for (const { work_order_id } of legacyWoIds) {
+          const [wosRows] = await pool.query(
+            'SELECT id FROM work_order_services WHERE work_order_id = ? ORDER BY id LIMIT 1',
+            [work_order_id]
+          );
+          let wosId = wosRows[0]?.id;
+          if (!wosId) {
+            const [wo] = await pool.query('SELECT service_id FROM work_orders WHERE id = ?', [work_order_id]);
+            const svcId = wo[0]?.service_id;
+            const [cnt] = await pool.query('SELECT COUNT(*) as c FROM work_order_housings WHERE work_order_id = ?', [work_order_id]);
+            const hCount = cnt[0]?.c || 0;
+            if (svcId) {
+              const [ins] = await pool.query(
+                'INSERT INTO work_order_services (work_order_id, service_id, housing_count) VALUES (?, ?, ?)',
+                [work_order_id, svcId, hCount]
+              );
+              wosId = ins.insertId;
+            } else {
+              const [firstSvc] = await pool.query('SELECT id FROM services WHERE is_active = 1 LIMIT 1');
+              if (firstSvc.length > 0) {
+                const [ins] = await pool.query(
+                  'INSERT INTO work_order_services (work_order_id, service_id, housing_count) VALUES (?, ?, ?)',
+                  [work_order_id, firstSvc[0].id, hCount]
+                );
+                wosId = ins.insertId;
+              }
+            }
+          }
+          if (wosId) {
+            await pool.query('UPDATE work_order_housings SET work_order_service_id = ? WHERE work_order_id = ? AND work_order_service_id IS NULL', [wosId, work_order_id]);
+          }
+        }
+        try {
+          await pool.query('ALTER TABLE work_order_housings DROP INDEX unique_work_order_measure_code');
+        } catch (e) { /* puede no existir */ }
+        try {
+          await pool.query('ALTER TABLE work_order_housings ADD UNIQUE KEY unique_work_order_service_measure (work_order_service_id, measure_code)');
+        } catch (e) {
+          if (!e.sqlMessage?.includes('Duplicate')) console.warn('Unique work_order_service_measure:', e.message);
+        }
+        console.log('Added work_order_service_id to work_order_housings, migrated legacy data');
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error adding work_order_service_id:', error.message);
+      }
+    }
+
     // Ensure work_order_housing_measurements table exists
     try {
       await pool.query(`

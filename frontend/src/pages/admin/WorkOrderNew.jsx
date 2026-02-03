@@ -15,8 +15,8 @@ export default function WorkOrderNew() {
   const [services, setServices] = useState([]);
   const [technicians, setTechnicians] = useState([]);
   const [showHousingsModal, setShowHousingsModal] = useState(false);
-  const [serviceHousings, setServiceHousings] = useState([]);
-  const [orderServices, setOrderServices] = useState([{ serviceId: '', housingCount: 0 }]); // [{ serviceId, housingCount }]
+  const [editingServiceIdx, setEditingServiceIdx] = useState(null);
+  const [orderServices, setOrderServices] = useState([{ serviceId: '', housingCount: 0, housings: [] }]);
   const [formData, setFormData] = useState({
     clientId: '',
     equipmentId: '',
@@ -30,7 +30,6 @@ export default function WorkOrderNew() {
   });
 
   const numberToLetters = (n) => {
-    // 1 -> A, 2 -> B, ... 26 -> Z, 27 -> AA
     let num = n;
     let s = '';
     while (num > 0) {
@@ -41,28 +40,60 @@ export default function WorkOrderNew() {
     return s;
   };
 
-  const totalHousingCount = orderServices.reduce((sum, s) => sum + (Number(s.housingCount) || 0), 0);
-
-  const openHousingsModalForCount = (count) => {
-    const c = Number(count);
-    if (!Number.isFinite(c) || c <= 0) {
-      setServiceHousings([]);
-      setShowHousingsModal(false);
+  const openHousingsModalForService = (idx) => {
+    const os = orderServices[idx];
+    const count = Number(os.housingCount) || 0;
+    if (!Number.isFinite(count) || count <= 0) {
+      showWarning('Indique la cantidad de alojamientos antes de configurarlos.');
       return;
     }
-    const next = Array.from({ length: c }).map((_, idx) => ({
-      measureCode: numberToLetters(idx + 1),
-      description: '',
-      nominalValue: '',
-      nominalUnit: '',
-      tolerance: ''
-    }));
-    setServiceHousings(next);
+    const existing = os.housings || [];
+    const next = Array.from({ length: count }).map((_, i) => {
+      if (existing[i]) return existing[i];
+      return {
+        measureCode: numberToLetters(i + 1),
+        description: '',
+        nominalValue: '',
+        nominalUnit: '',
+        tolerance: ''
+      };
+    });
+    const nextServices = [...orderServices];
+    nextServices[idx] = { ...nextServices[idx], housings: next };
+    setOrderServices(nextServices);
+    setEditingServiceIdx(idx);
     setShowHousingsModal(true);
   };
 
+  const closeHousingsModal = (save = false) => {
+    if (save && editingServiceIdx !== null) {
+      const os = orderServices[editingServiceIdx];
+      const housings = os.housings || [];
+      const hasMissing = housings.some(
+        (h) => !h.measureCode || !h.description || (h.nominalValue !== '' && !h.nominalUnit)
+      );
+      if (hasMissing) {
+        showWarning('Complete Medida y Descripción. Si ingresa Medida Nominal, también indique la Unidad.');
+        return;
+      }
+    }
+    setShowHousingsModal(false);
+    setEditingServiceIdx(null);
+  };
+
+  const updateHousing = (idx, field, value) => {
+    const next = [...orderServices];
+    const h = next[editingServiceIdx].housings || [];
+    const hi = h[idx];
+    if (hi) {
+      h[idx] = { ...hi, [field]: value };
+      next[editingServiceIdx] = { ...next[editingServiceIdx], housings: h };
+      setOrderServices(next);
+    }
+  };
+
   const addService = () => {
-    setOrderServices([...orderServices, { serviceId: '', housingCount: 0 }]);
+    setOrderServices([...orderServices, { serviceId: '', housingCount: 0, housings: [] }]);
   };
 
   const removeService = (idx) => {
@@ -72,6 +103,28 @@ export default function WorkOrderNew() {
   const updateService = (idx, field, value) => {
     const next = [...orderServices];
     next[idx] = { ...next[idx], [field]: value };
+    if (field === 'housingCount') {
+      const count = Number(value) || 0;
+      if (count > 0) {
+        const existing = next[idx].housings || [];
+        const newHousings = Array.from({ length: count }).map((_, i) => {
+          if (existing[i]) return existing[i];
+          return {
+            measureCode: numberToLetters(i + 1),
+            description: '',
+            nominalValue: '',
+            nominalUnit: '',
+            tolerance: ''
+          };
+        });
+        next[idx] = { ...next[idx], housings: newHousings };
+        setOrderServices(next);
+        setEditingServiceIdx(idx);
+        setShowHousingsModal(true);
+      } else {
+        next[idx] = { ...next[idx], housings: [] };
+      }
+    }
     setOrderServices(next);
   };
 
@@ -126,26 +179,36 @@ export default function WorkOrderNew() {
         setLoading(false);
         return;
       }
-      const count = totalHousingCount;
-      if (count > 0) {
-        if (!serviceHousings || serviceHousings.length !== count) {
-          showWarning('Debe completar la información de los alojamientos antes de crear la orden.');
-          setLoading(false);
-          return;
-        }
-        const hasMissing = serviceHousings.some(
-          (h) => !h.measureCode || !h.description || (h.nominalValue !== '' && !h.nominalUnit)
-        );
-        if (hasMissing) {
-          showWarning('Complete Medida y Descripción. Si ingresa Medida Nominal, también indique la Unidad.');
-          setLoading(false);
-          return;
-        }
-      }
 
       const servicesPayload = orderServices
         .filter(s => s.serviceId)
-        .map(s => ({ serviceId: parseInt(s.serviceId), housingCount: parseInt(s.housingCount) || 0 }));
+        .map(s => {
+          const housingCount = parseInt(s.housingCount) || 0;
+          const housings = (s.housings || []).slice(0, housingCount);
+          const hasMissing = housings.some(
+            (h) => !h.measureCode || !h.description || (h.nominalValue !== '' && !h.nominalUnit)
+          );
+          if (housingCount > 0 && hasMissing) {
+            throw new Error('Complete los alojamientos de cada servicio.');
+          }
+          return {
+            serviceId: parseInt(s.serviceId),
+            housingCount,
+            housings: housings.map(h => ({
+              measureCode: h.measureCode,
+              description: h.description,
+              nominalValue: h.nominalValue !== '' ? parseFloat(h.nominalValue) : null,
+              nominalUnit: h.nominalValue !== '' ? (h.nominalUnit || null) : null,
+              tolerance: h.tolerance || null
+            }))
+          };
+        });
+
+      if (servicesPayload.some(s => s.housingCount > 0 && s.housings.length !== s.housingCount)) {
+        showWarning('Debe completar la información de los alojamientos de cada servicio.');
+        setLoading(false);
+        return;
+      }
 
       const response = await api.post('/work-orders', {
         clientId: parseInt(formData.clientId),
@@ -153,13 +216,6 @@ export default function WorkOrderNew() {
         services: servicesPayload,
         serviceLocation: formData.serviceLocation || null,
         clientServiceOrderNumber: formData.clientServiceOrderNumber || null,
-        serviceHousings: count > 0 ? serviceHousings.map(h => ({
-          measureCode: h.measureCode,
-          description: h.description,
-          nominalValue: h.nominalValue !== '' ? parseFloat(h.nominalValue) : null,
-          nominalUnit: h.nominalValue !== '' ? (h.nominalUnit || null) : null,
-          tolerance: h.tolerance || null
-        })) : [],
         title: formData.title,
         description: formData.description,
         priority: formData.priority,
@@ -172,11 +228,20 @@ export default function WorkOrderNew() {
         navigate(`/admin/work-orders/${response.data.id}`);
       }, 1000);
     } catch (error) {
-      showError(error.response?.data?.error || 'Error al crear la orden de trabajo');
+      if (error instanceof Error && error.message) {
+        showWarning(error.message);
+      } else {
+        showError(error.response?.data?.error || 'Error al crear la orden de trabajo');
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  const currentHousings = editingServiceIdx !== null ? (orderServices[editingServiceIdx]?.housings || []) : [];
+  const currentServiceName = editingServiceIdx !== null && orderServices[editingServiceIdx]?.serviceId
+    ? (services.find(s => s.id === parseInt(orderServices[editingServiceIdx].serviceId))?.name || 'Servicio'
+    : 'Servicio';
 
   return (
     <div className="work-order-new">
@@ -224,55 +289,6 @@ export default function WorkOrderNew() {
           </div>
 
           <div className="form-group">
-            <label>Servicios</label>
-            <p style={{ marginTop: -4, marginBottom: 8, color: '#6e6b7b', fontSize: '0.9em' }}>
-              Puede agregar uno o más servicios. Cada uno requiere la cantidad de alojamientos a intervenir.
-            </p>
-            {orderServices.map((os, idx) => (
-              <div key={idx} className="service-row" style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 12 }}>
-                <div style={{ flex: 2, minWidth: 0 }}>
-                  <SearchableSelect
-                    value={os.serviceId}
-                    onChange={(val) => {
-                      updateService(idx, 'serviceId', val);
-                      if (val && !formData.title) {
-                        const svc = services.find(s => s.id === parseInt(val));
-                        if (svc) setFormData(prev => ({ ...prev, title: svc.name }));
-                      }
-                    }}
-                    options={services
-                      .filter(s => !orderServices.some((o, i) => i !== idx && o.serviceId === String(s.id)))
-                      .map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
-                    placeholder="Seleccionar servicio..."
-                  />
-                </div>
-                <div style={{ flex: 1, minWidth: 100 }}>
-                  <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Alojamientos</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={os.housingCount || ''}
-                    onChange={(e) => updateService(idx, 'housingCount', e.target.value)}
-                    placeholder="0"
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => removeService(idx)}
-                  title="Quitar servicio"
-                  style={{ padding: '8px 12px' }}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            <button type="button" className="btn-secondary" onClick={addService} style={{ marginTop: 4 }}>
-              + Agregar Servicio
-            </button>
-          </div>
-
-          <div className="form-group">
             <label htmlFor="serviceLocation">Ubicación del Servicio</label>
             <input
               type="text"
@@ -293,20 +309,6 @@ export default function WorkOrderNew() {
               placeholder="Ej: OS-12345"
             />
           </div>
-
-          {totalHousingCount > 0 && (
-            <div className="form-group">
-              <label>Alojamientos a intervenir (total: {totalHousingCount})</label>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ marginTop: 8 }}
-                onClick={() => openHousingsModalForCount(totalHousingCount)}
-              >
-                Configurar Alojamientos
-              </button>
-            </div>
-          )}
 
           <div className="form-group">
             <label htmlFor="title">Título de la Orden *</label>
@@ -329,6 +331,66 @@ export default function WorkOrderNew() {
               placeholder="Descripción detallada del trabajo a realizar..."
               rows="4"
             />
+          </div>
+
+          <div className="form-group">
+            <label>Servicios</label>
+            <p style={{ marginTop: -4, marginBottom: 8, color: '#6e6b7b', fontSize: '0.9em' }}>
+              Agregue uno o más servicios. Para cada uno: seleccione el servicio, indique la cantidad de alojamientos y complete los datos (se abrirá la ventana automáticamente).
+            </p>
+            {orderServices.map((os, idx) => (
+              <div key={idx} className="service-row" style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 12, flexWrap: 'wrap' }}>
+                <div style={{ flex: '2 1 200px', minWidth: 0 }}>
+                  <SearchableSelect
+                    value={os.serviceId}
+                    onChange={(val) => {
+                      updateService(idx, 'serviceId', val);
+                      if (val && !formData.title) {
+                        const svc = services.find(s => s.id === parseInt(val));
+                        if (svc) setFormData(prev => ({ ...prev, title: svc.name }));
+                      }
+                    }}
+                    options={services
+                      .filter(s => !orderServices.some((o, i) => i !== idx && o.serviceId === String(s.id)))
+                      .map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
+                    placeholder="Seleccionar servicio..."
+                  />
+                </div>
+                <div style={{ flex: '1 1 100px', minWidth: 100 }}>
+                  <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Alojamientos</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={os.housingCount || ''}
+                    onChange={(e) => updateService(idx, 'housingCount', e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => openHousingsModalForService(idx)}
+                    title="Ver / Editar alojamientos"
+                    style={{ padding: '8px 12px' }}
+                  >
+                    📋
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => removeService(idx)}
+                    title="Quitar servicio"
+                    style={{ padding: '8px 12px' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button type="button" className="btn-secondary" onClick={addService} style={{ marginTop: 4 }}>
+              + Agregar Servicio
+            </button>
           </div>
         </div>
 
@@ -386,12 +448,12 @@ export default function WorkOrderNew() {
         </div>
       </form>
 
-      {showHousingsModal && (
-        <div className="modal-overlay" onClick={() => setShowHousingsModal(false)}>
+      {showHousingsModal && editingServiceIdx !== null && (
+        <div className="modal-overlay" onClick={() => closeHousingsModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 750 }}>
-            <h2>Alojamientos del Servicio</h2>
+            <h2>Alojamientos — {currentServiceName}</h2>
             <p style={{ marginTop: -8, color: '#6e6b7b' }}>
-              Complete la información de cada alojamiento. La “Medida” es automática (A, B, C...).
+              Complete la información de cada alojamiento. Cada servicio comienza con A, B, C...
             </p>
             <div style={{ overflowX: 'auto' }}>
               <table className="data-table">
@@ -405,17 +467,13 @@ export default function WorkOrderNew() {
                   </tr>
                 </thead>
                 <tbody>
-                  {serviceHousings.map((h, idx) => (
-                    <tr key={h.measureCode}>
+                  {currentHousings.map((h, idx) => (
+                    <tr key={h.measureCode + idx}>
                       <td style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{h.measureCode}</td>
                       <td>
                         <input
                           value={h.description}
-                          onChange={(e) => {
-                            const next = [...serviceHousings];
-                            next[idx] = { ...next[idx], description: e.target.value };
-                            setServiceHousings(next);
-                          }}
+                          onChange={(e) => updateHousing(idx, 'description', e.target.value)}
                           placeholder="Descripción del alojamiento"
                         />
                       </td>
@@ -424,11 +482,7 @@ export default function WorkOrderNew() {
                           type="number"
                           step="0.001"
                           value={h.nominalValue}
-                          onChange={(e) => {
-                            const next = [...serviceHousings];
-                            next[idx] = { ...next[idx], nominalValue: e.target.value };
-                            setServiceHousings(next);
-                          }}
+                          onChange={(e) => updateHousing(idx, 'nominalValue', e.target.value)}
                           placeholder="0.000"
                         />
                       </td>
@@ -436,23 +490,14 @@ export default function WorkOrderNew() {
                         <input
                           type="text"
                           value={h.tolerance}
-                          onChange={(e) => {
-                            const next = [...serviceHousings];
-                            next[idx] = { ...next[idx], tolerance: e.target.value };
-                            setServiceHousings(next);
-                          }}
+                          onChange={(e) => updateHousing(idx, 'tolerance', e.target.value)}
                           placeholder="+0.5, -0.3, ±0.2"
-                          pattern="[+\-±]?[0-9]*\.?[0-9]*"
                         />
                       </td>
                       <td>
                         <input
                           value={h.nominalUnit}
-                          onChange={(e) => {
-                            const next = [...serviceHousings];
-                            next[idx] = { ...next[idx], nominalUnit: e.target.value };
-                            setServiceHousings(next);
-                          }}
+                          onChange={(e) => updateHousing(idx, 'nominalUnit', e.target.value)}
                           placeholder="mm, in, etc."
                         />
                       </td>
@@ -462,26 +507,8 @@ export default function WorkOrderNew() {
               </table>
             </div>
             <div className="modal-actions">
-              <button type="button" onClick={() => setShowHousingsModal(false)}>Cerrar</button>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={() => {
-                  const count = totalHousingCount;
-                  if (count > 0 && serviceHousings.length !== count) {
-                    showWarning('Cantidad de alojamientos no coincide.');
-                    return;
-                  }
-                  const hasMissing = serviceHousings.some(
-                    (h) => !h.measureCode || !h.description || (h.nominalValue !== '' && !h.nominalUnit)
-                  );
-                  if (hasMissing) {
-                    showWarning('Complete Medida y Descripción. Si ingresa Medida Nominal, también indique la Unidad.');
-                    return;
-                  }
-                  setShowHousingsModal(false);
-                }}
-              >
+              <button type="button" onClick={() => closeHousingsModal(false)}>Cerrar</button>
+              <button type="button" className="btn-primary" onClick={() => closeHousingsModal(true)}>
                 Guardar
               </button>
             </div>
@@ -501,4 +528,3 @@ export default function WorkOrderNew() {
     </div>
   );
 }
-
