@@ -625,7 +625,7 @@ export default function WorkOrderDetail() {
                       <ul style={{ margin: 0, paddingLeft: 20 }}>
                         {(order.services || []).map((s, i) => (
                           <li key={i}>
-                            {s.service_code} {s.service_name} — {(s.housings || []).length || s.housing_count ?? 0} alojamiento(s)
+                            {s.service_code} {s.service_name} — {((s.housings || []).length || s.housing_count || 0)} alojamiento(s)
                           </li>
                         ))}
                       </ul>
