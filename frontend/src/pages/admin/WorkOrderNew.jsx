@@ -239,9 +239,11 @@ export default function WorkOrderNew() {
   };
 
   const currentHousings = editingServiceIdx !== null ? (orderServices[editingServiceIdx]?.housings || []) : [];
-  const currentServiceName = editingServiceIdx !== null && orderServices[editingServiceIdx]?.serviceId
-    ? (services.find(s => s.id === parseInt(orderServices[editingServiceIdx].serviceId))?.name || 'Servicio'
-    : 'Servicio';
+  let currentServiceName = 'Servicio';
+  if (editingServiceIdx !== null && orderServices[editingServiceIdx]?.serviceId) {
+    const svc = services.find(s => s.id === parseInt(orderServices[editingServiceIdx].serviceId));
+    currentServiceName = svc?.name || 'Servicio';
+  }
 
   return (
     <div className="work-order-new">
