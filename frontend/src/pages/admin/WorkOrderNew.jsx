@@ -16,13 +16,12 @@ export default function WorkOrderNew() {
   const [technicians, setTechnicians] = useState([]);
   const [showHousingsModal, setShowHousingsModal] = useState(false);
   const [serviceHousings, setServiceHousings] = useState([]);
+  const [orderServices, setOrderServices] = useState([{ serviceId: '', housingCount: 0 }]); // [{ serviceId, housingCount }]
   const [formData, setFormData] = useState({
     clientId: '',
     equipmentId: '',
-    serviceId: '',
     serviceLocation: '',
     clientServiceOrderNumber: '',
-    serviceHousingCount: '',
     title: '',
     description: '',
     priority: 'medium',
@@ -42,6 +41,8 @@ export default function WorkOrderNew() {
     return s;
   };
 
+  const totalHousingCount = orderServices.reduce((sum, s) => sum + (Number(s.housingCount) || 0), 0);
+
   const openHousingsModalForCount = (count) => {
     const c = Number(count);
     if (!Number.isFinite(c) || c <= 0) {
@@ -58,6 +59,20 @@ export default function WorkOrderNew() {
     }));
     setServiceHousings(next);
     setShowHousingsModal(true);
+  };
+
+  const addService = () => {
+    setOrderServices([...orderServices, { serviceId: '', housingCount: 0 }]);
+  };
+
+  const removeService = (idx) => {
+    setOrderServices(orderServices.filter((_, i) => i !== idx));
+  };
+
+  const updateService = (idx, field, value) => {
+    const next = [...orderServices];
+    next[idx] = { ...next[idx], [field]: value };
+    setOrderServices(next);
   };
 
   useEffect(() => {
@@ -111,7 +126,7 @@ export default function WorkOrderNew() {
         setLoading(false);
         return;
       }
-      const count = formData.serviceHousingCount ? parseInt(formData.serviceHousingCount) : 0;
+      const count = totalHousingCount;
       if (count > 0) {
         if (!serviceHousings || serviceHousings.length !== count) {
           showWarning('Debe completar la información de los alojamientos antes de crear la orden.');
@@ -128,13 +143,17 @@ export default function WorkOrderNew() {
         }
       }
 
+      const servicesPayload = orderServices
+        .filter(s => s.serviceId)
+        .map(s => ({ serviceId: parseInt(s.serviceId), housingCount: parseInt(s.housingCount) || 0 }));
+
       const response = await api.post('/work-orders', {
         clientId: parseInt(formData.clientId),
         equipmentId: parseInt(formData.equipmentId),
-        serviceId: formData.serviceId ? parseInt(formData.serviceId) : null,
+        services: servicesPayload,
         serviceLocation: formData.serviceLocation || null,
         clientServiceOrderNumber: formData.clientServiceOrderNumber || null,
-        serviceHousings: (parseInt(formData.serviceHousingCount) > 0) ? serviceHousings.map(h => ({
+        serviceHousings: count > 0 ? serviceHousings.map(h => ({
           measureCode: h.measureCode,
           description: h.description,
           nominalValue: h.nominalValue !== '' ? parseFloat(h.nominalValue) : null,
@@ -156,23 +175,6 @@ export default function WorkOrderNew() {
       showError(error.response?.data?.error || 'Error al crear la orden de trabajo');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleServiceChange = (serviceId) => {
-    if (serviceId) {
-      const selectedService = services.find(s => s.id === parseInt(serviceId));
-      if (selectedService && !formData.title) {
-        setFormData({
-          ...formData,
-          serviceId: serviceId,
-          title: selectedService.name
-        });
-      } else {
-        setFormData({ ...formData, serviceId: serviceId });
-      }
-    } else {
-      setFormData({ ...formData, serviceId: '' });
     }
   };
 
@@ -222,16 +224,52 @@ export default function WorkOrderNew() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="serviceId">Servicio</label>
-            <SearchableSelect
-              id="serviceId"
-              value={formData.serviceId}
-              onChange={(val) => handleServiceChange(val)}
-              options={services.map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
-              placeholder="Escriba para buscar servicio (opcional)..."
-              allowClear
-              clearLabel="(Opcional) Sin servicio"
-            />
+            <label>Servicios</label>
+            <p style={{ marginTop: -4, marginBottom: 8, color: '#6e6b7b', fontSize: '0.9em' }}>
+              Puede agregar uno o más servicios. Cada uno requiere la cantidad de alojamientos a intervenir.
+            </p>
+            {orderServices.map((os, idx) => (
+              <div key={idx} className="service-row" style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 12 }}>
+                <div style={{ flex: 2, minWidth: 0 }}>
+                  <SearchableSelect
+                    value={os.serviceId}
+                    onChange={(val) => {
+                      updateService(idx, 'serviceId', val);
+                      if (val && !formData.title) {
+                        const svc = services.find(s => s.id === parseInt(val));
+                        if (svc) setFormData(prev => ({ ...prev, title: svc.name }));
+                      }
+                    }}
+                    options={services
+                      .filter(s => !orderServices.some((o, i) => i !== idx && o.serviceId === String(s.id)))
+                      .map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
+                    placeholder="Seleccionar servicio..."
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: 100 }}>
+                  <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Alojamientos</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={os.housingCount || ''}
+                    onChange={(e) => updateService(idx, 'housingCount', e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => removeService(idx)}
+                  title="Quitar servicio"
+                  style={{ padding: '8px 12px' }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button type="button" className="btn-secondary" onClick={addService} style={{ marginTop: 4 }}>
+              + Agregar Servicio
+            </button>
           </div>
 
           <div className="form-group">
@@ -256,35 +294,19 @@ export default function WorkOrderNew() {
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="serviceHousingCount">Cantidad de Alojamientos a intervenir</label>
-            <input
-              type="number"
-              id="serviceHousingCount"
-              min="0"
-              value={formData.serviceHousingCount}
-              onChange={(e) => {
-                const v = e.target.value;
-                setFormData({ ...formData, serviceHousingCount: v });
-                if (v && parseInt(v) > 0) {
-                  openHousingsModalForCount(v);
-                } else {
-                  setServiceHousings([]);
-                }
-              }}
-              placeholder="0"
-            />
-            {parseInt(formData.serviceHousingCount) > 0 && (
+          {totalHousingCount > 0 && (
+            <div className="form-group">
+              <label>Alojamientos a intervenir (total: {totalHousingCount})</label>
               <button
                 type="button"
                 className="btn-secondary"
                 style={{ marginTop: 8 }}
-                onClick={() => setShowHousingsModal(true)}
+                onClick={() => openHousingsModalForCount(totalHousingCount)}
               >
                 Configurar Alojamientos
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="form-group">
             <label htmlFor="title">Título de la Orden *</label>
@@ -445,7 +467,7 @@ export default function WorkOrderNew() {
                 type="button"
                 className="btn-primary"
                 onClick={() => {
-                  const count = parseInt(formData.serviceHousingCount) || 0;
+                  const count = totalHousingCount;
                   if (count > 0 && serviceHousings.length !== count) {
                     showWarning('Cantidad de alojamientos no coincide.');
                     return;

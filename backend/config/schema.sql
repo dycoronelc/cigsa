@@ -141,6 +141,18 @@ CREATE TABLE IF NOT EXISTS work_orders (
 -- Migration-safe: add column if table already exists (duplicate column errors are ignored by initDatabase)
 ALTER TABLE work_orders ADD COLUMN client_service_order_number VARCHAR(50) NULL COMMENT 'N° Orden de Servicio del Cliente';
 
+-- Work Order Services (múltiples servicios por OT, cada uno con su cantidad de alojamientos)
+CREATE TABLE IF NOT EXISTS work_order_services (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  work_order_id INT NOT NULL,
+  service_id INT NOT NULL,
+  housing_count INT DEFAULT 0 COMMENT 'Cantidad de alojamientos a intervenir para este servicio',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_work_order_service (work_order_id, service_id)
+);
+
 -- Work Order Service Housings (Alojamientos intervenidos en la OT)
 CREATE TABLE IF NOT EXISTS work_order_housings (
   id INT PRIMARY KEY AUTO_INCREMENT,

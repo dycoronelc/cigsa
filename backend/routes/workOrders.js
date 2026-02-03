@@ -44,8 +44,6 @@ router.get('/', authenticateToken, async (req, res) => {
         CONCAT(eb.name, ' ', em.model_name, ' - ', e.serial_number) as equipment_name,
         em.model_name,
         eb.name as brand_name,
-        s.name as service_name,
-        s.code as service_code,
         u.full_name as technician_name,
         creator.full_name as created_by_name
       FROM work_orders wo
@@ -53,7 +51,6 @@ router.get('/', authenticateToken, async (req, res) => {
       LEFT JOIN equipment e ON wo.equipment_id = e.id
       LEFT JOIN equipment_models em ON e.model_id = em.id
       LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
-      LEFT JOIN services s ON wo.service_id = s.id
       LEFT JOIN users u ON wo.assigned_technician_id = u.id
       LEFT JOIN users creator ON wo.created_by = creator.id
     `;
@@ -96,9 +93,6 @@ router.get('/:id', authenticateToken, async (req, res) => {
         eb.name as brand_name,
         eb.id as brand_id,
         em.id as model_id,
-        s.name as service_name,
-        s.code as service_code,
-        s.description as service_description,
         u.full_name as technician_name,
         u.phone as technician_phone,
         creator.full_name as created_by_name
@@ -107,7 +101,6 @@ router.get('/:id', authenticateToken, async (req, res) => {
       LEFT JOIN equipment e ON wo.equipment_id = e.id
       LEFT JOIN equipment_models em ON e.model_id = em.id
       LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
-      LEFT JOIN services s ON wo.service_id = s.id
       LEFT JOIN users u ON wo.assigned_technician_id = u.id
       LEFT JOIN users creator ON wo.created_by = creator.id
       WHERE wo.id = ?
@@ -118,6 +111,31 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
     
     const order = orders[0];
+
+    // Get work order services (múltiples servicios por OT)
+    let orderServices = [];
+    try {
+      const [wosRows] = await pool.query(`
+        SELECT wos.id, wos.service_id, wos.housing_count, s.name as service_name, s.code as service_code, s.description as service_description
+        FROM work_order_services wos
+        LEFT JOIN services s ON wos.service_id = s.id
+        WHERE wos.work_order_id = ?
+        ORDER BY wos.id
+      `, [req.params.id]);
+      orderServices = wosRows || [];
+    } catch (err) {
+      console.error('Error fetching work order services:', err);
+    }
+    // Backward compat: if no work_order_services but has legacy service_id, include it
+    if (orderServices.length === 0 && order.service_id) {
+      const [legacy] = await pool.query(
+        'SELECT id, name as service_name, code as service_code, description as service_description FROM services WHERE id = ?',
+        [order.service_id]
+      );
+      if (legacy.length > 0) {
+        orderServices = [{ service_id: order.service_id, housing_count: order.service_housing_count || 0, ...legacy[0] }];
+      }
+    }
     
     // Check permissions
     if (req.user.role === 'technician' && order.assigned_technician_id !== req.user.id) {
@@ -273,6 +291,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     
     res.json({
       ...order,
+      services: orderServices,
       service_housings: serviceHousings,
       measurements: measurementsWithHousing,
       photos,
@@ -288,11 +307,17 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create work order
 router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'work_order'), async (req, res) => {
   try {
-    const { clientId, equipmentId, serviceId, serviceLocation, clientServiceOrderNumber, serviceHousings, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
+    const { clientId, equipmentId, services, serviceLocation, clientServiceOrderNumber, serviceHousings, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
     
     if (!clientId || !equipmentId || !title) {
       return res.status(400).json({ error: 'Client, equipment, and title are required' });
     }
+
+    // services: [{ serviceId, housingCount }] - múltiples servicios por OT
+    const servicesList = Array.isArray(services) && services.length > 0
+      ? services
+      : [];
+    const totalHousingCount = servicesList.reduce((sum, s) => sum + (Number(s.housingCount) || 0), 0);
     
     const pool = await getConnection();
     
@@ -302,16 +327,15 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
     
     const [result] = await pool.query(
       `INSERT INTO work_orders 
-       (order_number, client_id, equipment_id, service_id, service_location, client_service_order_number, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (order_number, client_id, equipment_id, service_location, client_service_order_number, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         orderNumber,
         clientId,
         equipmentId,
-        serviceId || null,
         serviceLocation || null,
         clientServiceOrderNumber || null,
-        Array.isArray(serviceHousings) ? serviceHousings.length : 0,
+        Array.isArray(serviceHousings) ? serviceHousings.length : totalHousingCount,
         assignedTechnicianId || null,
         title,
         description || null,
@@ -321,6 +345,19 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
         assignedTechnicianId ? 'assigned' : 'created'
       ]
     );
+
+    // Insert work_order_services (múltiples servicios por OT)
+    if (servicesList.length > 0) {
+      const wosValues = servicesList
+        .filter(s => s.serviceId)
+        .map(s => [result.insertId, s.serviceId, Number(s.housingCount) || 0]);
+      if (wosValues.length > 0) {
+        await pool.query(
+          'INSERT INTO work_order_services (work_order_id, service_id, housing_count) VALUES ?',
+          [wosValues]
+        );
+      }
+    }
 
     // Insert service housings if provided
     if (Array.isArray(serviceHousings) && serviceHousings.length > 0) {
@@ -357,7 +394,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
 // Update work order
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { title, description, priority, scheduledDate, assignedTechnicianId, status, serviceLocation, serviceId, clientServiceOrderNumber, equipmentId } = req.body;
+    const { title, description, priority, scheduledDate, assignedTechnicianId, status, serviceLocation, services, clientServiceOrderNumber, equipmentId } = req.body;
     const pool = await getConnection();
     
     // Check permissions
@@ -417,9 +454,17 @@ router.put('/:id', authenticateToken, async (req, res) => {
       updateFields.push('priority = ?');
       updateValues.push(priority);
     }
-    if (serviceId !== undefined) {
-      updateFields.push('service_id = ?');
-      updateValues.push(serviceId || null);
+    // Update work_order_services (múltiples servicios por OT)
+    if (services !== undefined && Array.isArray(services)) {
+      await pool.query('DELETE FROM work_order_services WHERE work_order_id = ?', [req.params.id]);
+      const servicesList = services.filter(s => s && s.serviceId);
+      if (servicesList.length > 0) {
+        const wosValues = servicesList.map(s => [req.params.id, s.serviceId, Number(s.housingCount) || 0]);
+        await pool.query(
+          'INSERT INTO work_order_services (work_order_id, service_id, housing_count) VALUES ?',
+          [wosValues]
+        );
+      }
     }
     if (serviceLocation !== undefined) {
       updateFields.push('service_location = ?');

@@ -49,7 +49,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
     const service = services[0];
 
-    // Get work orders history for this service
+    // Get work orders history for this service (via work_order_services o legacy service_id)
     const [workOrders] = await pool.query(`
       SELECT 
         wo.id,
@@ -70,9 +70,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
       LEFT JOIN equipment_models em ON e.model_id = em.id
       LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
       LEFT JOIN users u ON wo.assigned_technician_id = u.id
-      WHERE wo.service_id = ?
+      WHERE EXISTS (SELECT 1 FROM work_order_services wos WHERE wos.work_order_id = wo.id AND wos.service_id = ?)
+         OR wo.service_id = ?
       ORDER BY wo.created_at DESC
-    `, [req.params.id]);
+    `, [req.params.id, req.params.id]);
 
     // Calculate statistics
     const totalOrders = workOrders.length;

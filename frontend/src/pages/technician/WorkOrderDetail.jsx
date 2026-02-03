@@ -321,6 +321,20 @@ export default function TechnicianWorkOrderDetail() {
               <label>N° Orden de Servicio del Cliente</label>
               <p>{order.client_service_order_number || '-'}</p>
             </div>
+            <div className="info-item" style={{ gridColumn: '1 / -1' }}>
+              <label>Servicios</label>
+              {(order.services || []).length > 0 ? (
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {(order.services || []).map((s, i) => (
+                    <li key={i}>
+                      <strong>{s.service_code} {s.service_name}</strong> — {s.housing_count ?? 0} alojamiento(s) a intervenir
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>-</p>
+              )}
+            </div>
             <div className="info-item">
               <label>Fecha de Inicio</label>
               <p>{order.start_date 

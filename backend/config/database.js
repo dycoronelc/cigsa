@@ -178,6 +178,44 @@ export const initDatabase = async () => {
       }
     }
 
+    // Ensure work_order_services table exists (múltiples servicios por OT)
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS work_order_services (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          work_order_id INT NOT NULL,
+          service_id INT NOT NULL,
+          housing_count INT DEFAULT 0 COMMENT 'Cantidad de alojamientos a intervenir para este servicio',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
+          FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE,
+          UNIQUE KEY unique_work_order_service (work_order_id, service_id)
+        )
+      `);
+      // Migrate existing work_orders with service_id to work_order_services
+      const [existing] = await pool.query(`
+        SELECT id, service_id, service_housing_count 
+        FROM work_orders 
+        WHERE service_id IS NOT NULL 
+        AND NOT EXISTS (SELECT 1 FROM work_order_services wos WHERE wos.work_order_id = work_orders.id)
+      `);
+      for (const row of existing) {
+        try {
+          await pool.query(
+            'INSERT INTO work_order_services (work_order_id, service_id, housing_count) VALUES (?, ?, ?)',
+            [row.id, row.service_id, row.service_housing_count || 0]
+          );
+        } catch (err) {
+          if (!err.sqlMessage?.includes('Duplicate')) console.warn('Migration work_order_services:', err.message);
+        }
+      }
+      if (existing.length > 0) {
+        console.log(`Migrated ${existing.length} work orders to work_order_services`);
+      }
+    } catch (error) {
+      console.error('Error ensuring work_order_services table:', error.sqlMessage || error.message);
+    }
+
     // Ensure work_order_housings table exists
     try {
       await pool.query(`

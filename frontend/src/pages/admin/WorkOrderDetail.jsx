@@ -25,7 +25,7 @@ export default function WorkOrderDetail() {
     priority: 'medium',
     scheduledDate: '',
     assignedTechnicianId: '',
-    serviceId: '',
+    services: [],
     description: ''
   });
   const [services, setServices] = useState([]);
@@ -110,6 +110,7 @@ export default function WorkOrderDetail() {
 
   const startEdit = () => {
     if (!order) return;
+    const orderServicesList = order.services || [];
     setEditData({
       title: order.title || '',
       equipmentId: order.equipment_id ? String(order.equipment_id) : '',
@@ -118,7 +119,9 @@ export default function WorkOrderDetail() {
       priority: order.priority || 'medium',
       scheduledDate: toDateInputValue(order.scheduled_date),
       assignedTechnicianId: order.assigned_technician_id ? String(order.assigned_technician_id) : '',
-      serviceId: order.service_id ? String(order.service_id) : '',
+      services: orderServicesList.length > 0
+        ? orderServicesList.map(s => ({ serviceId: String(s.service_id), housingCount: s.housing_count || 0 }))
+        : [{ serviceId: '', housingCount: 0 }],
       description: order.description || ''
     });
     setEditMode(true);
@@ -154,9 +157,11 @@ export default function WorkOrderDetail() {
       payload.assignedTechnicianId = editData.assignedTechnicianId ? parseInt(editData.assignedTechnicianId) : null;
     }
 
-    const currentServiceId = order.service_id ? String(order.service_id) : '';
-    if (editData.serviceId !== currentServiceId) {
-      payload.serviceId = editData.serviceId ? parseInt(editData.serviceId) : null;
+    const currentServices = (order.services || []).map(s => ({ serviceId: String(s.service_id), housingCount: s.housing_count || 0 }));
+    const newServices = (editData.services || []).filter(s => s.serviceId).map(s => ({ serviceId: parseInt(s.serviceId), housingCount: parseInt(s.housingCount) || 0 }));
+    const servicesChanged = JSON.stringify(currentServices) !== JSON.stringify(newServices);
+    if (servicesChanged) {
+      payload.services = newServices;
     }
 
     if (editData.description !== (order.description || '')) payload.description = editData.description;
@@ -446,19 +451,74 @@ export default function WorkOrderDetail() {
                 )}
               </div>
 
-              <div className="info-item">
-                <label>Servicio</label>
+              <div className="info-item" style={{ gridColumn: '1 / -1' }}>
+                <label>Servicios</label>
                 {editMode ? (
-                  <SearchableSelect
-                    value={editData.serviceId}
-                    onChange={(val) => setEditData({ ...editData, serviceId: val })}
-                    options={services.map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
-                    placeholder="Escriba para buscar servicio..."
-                    allowClear
-                    clearLabel="(Opcional) Sin servicio"
-                  />
+                  <div>
+                    {(editData.services || []).map((os, idx) => (
+                      <div key={idx} style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 12 }}>
+                        <div style={{ flex: 2, minWidth: 0 }}>
+                          <SearchableSelect
+                            value={os.serviceId}
+                            onChange={(val) => {
+                              const next = [...(editData.services || [])];
+                              next[idx] = { ...next[idx], serviceId: val };
+                              setEditData({ ...editData, services: next });
+                            }}
+                            options={services
+                              .filter(s => !(editData.services || []).some((o, i) => i !== idx && o.serviceId === String(s.id)))
+                              .map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
+                            placeholder="Seleccionar servicio..."
+                          />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 100 }}>
+                          <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Alojamientos</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={os.housingCount || ''}
+                            onChange={(e) => {
+                              const next = [...(editData.services || [])];
+                              next[idx] = { ...next[idx], housingCount: e.target.value };
+                              setEditData({ ...editData, services: next });
+                            }}
+                            placeholder="0"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => setEditData({ ...editData, services: (editData.services || []).filter((_, i) => i !== idx) })}
+                          title="Quitar servicio"
+                          style={{ padding: '8px 12px' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => setEditData({ ...editData, services: [...(editData.services || []), { serviceId: '', housingCount: 0 }] })}
+                      style={{ marginTop: 4 }}
+                    >
+                      + Agregar Servicio
+                    </button>
+                  </div>
                 ) : (
-                  <p>{order.service_name ? `${order.service_code || ''} ${order.service_name}`.trim() : '-'}</p>
+                  <div>
+                    {(order.services || []).length > 0 ? (
+                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                        {(order.services || []).map((s, i) => (
+                          <li key={i}>
+                            {s.service_code} {s.service_name} — {s.housing_count ?? 0} alojamiento(s)
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>-</p>
+                    )}
+                  </div>
                 )}
               </div>
 
