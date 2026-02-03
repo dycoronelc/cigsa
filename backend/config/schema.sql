@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS work_order_services (
 CREATE TABLE IF NOT EXISTS work_order_housings (
   id INT PRIMARY KEY AUTO_INCREMENT,
   work_order_id INT NOT NULL,
-  work_order_service_id INT NULL COMMENT 'Servicio al que pertenece; NULL para legacy',
+  work_order_service_id INT NULL COMMENT 'Servicio al que pertenece (opcional para compatibilidad)',
   measure_code VARCHAR(10) NOT NULL COMMENT 'Correlativo A, B, C... por servicio (cada servicio empieza en A)',
   description TEXT,
   nominal_value DECIMAL(10, 3),
