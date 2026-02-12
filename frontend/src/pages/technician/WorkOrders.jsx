@@ -71,7 +71,10 @@ export default function TechnicianWorkOrders() {
                   {order.status === 'created' ? 'Creada' :
                    order.status === 'assigned' ? 'Asignada' :
                    order.status === 'in_progress' ? 'En Proceso' :
-                   order.status === 'completed' ? 'Completada' : 'Aceptada'}
+                   order.status === 'completed' ? 'Completada' :
+                   order.status === 'accepted' ? 'Aceptada' :
+                   order.status === 'on_hold' ? 'En Espera' :
+                   order.status === 'cancelled' ? 'Cancelada' : order.status}
                 </span>
               </div>
               <h3>{order.title}</h3>

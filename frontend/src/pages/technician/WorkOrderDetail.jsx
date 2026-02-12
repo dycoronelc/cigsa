@@ -65,8 +65,13 @@ export default function TechnicianWorkOrderDetail() {
   const [measurementData, setMeasurementData] = useState({ measurementType: 'initial', notes: '', housingMeasurements: [] });
   const [observationData, setObservationData] = useState({ observation: '', observationType: 'general' });
   const [expandedPhoto, setExpandedPhoto] = useState(null);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const [signatureData, setSignatureData] = useState({ signedBy: '', canvasRef: null });
+  const [activityLog, setActivityLog] = useState([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
+  const signatureCanvasRef = useRef(null);
 
   const isDocVisibleToTechnician = (d) => {
     const v = d?.is_visible_to_technician;
@@ -113,9 +118,113 @@ export default function TechnicianWorkOrderDetail() {
   const handleStatusChange = async (newStatus) => {
     try {
       await api.put(`/work-orders/${id}`, { status: newStatus });
+      showSuccess('Estado actualizado');
       fetchOrder();
+      if (activeTab === 'bitacora') fetchActivity();
     } catch (error) {
-      showError('Error al actualizar el estado');
+      showError(error.response?.data?.error || 'Error al actualizar el estado');
+    }
+  };
+
+  const fetchActivity = async () => {
+    setLoadingActivity(true);
+    try {
+      const res = await api.get(`/work-orders/${id}/activity`);
+      setActivityLog(res.data || []);
+    } catch (e) {
+      setActivityLog([]);
+    } finally {
+      setLoadingActivity(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'bitacora') fetchActivity();
+  }, [activeTab, id]);
+
+  const openSignatureModal = () => {
+    setSignatureData({ signedBy: '' });
+    setShowSignatureModal(true);
+    setTimeout(() => {
+      const canvas = signatureCanvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+      }
+    }, 100);
+  };
+
+  const getSignatureCoords = (e) => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const clientX = e.clientX != null ? e.clientX : e.touches?.[0]?.clientX;
+    const clientY = e.clientY != null ? e.clientY : e.touches?.[0]?.clientY;
+    if (clientX == null) return null;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  };
+
+  const handleSignatureStart = (e) => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const coords = getSignatureCoords(e);
+    if (!coords) return;
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.moveTo(coords.x, coords.y);
+  };
+
+  const handleSignatureMove = (e) => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const coords = getSignatureCoords(e);
+    if (!coords) return;
+    const ctx = canvas.getContext('2d');
+    ctx.lineTo(coords.x, coords.y);
+    ctx.stroke();
+  };
+
+  const handleSignatureEnd = () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.closePath();
+  };
+
+  const clearSignature = () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const submitConformitySignature = async () => {
+    if (!signatureData.signedBy || !signatureData.signedBy.trim()) {
+      showError('Indique el nombre del supervisor del cliente');
+      return;
+    }
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    if (!dataUrl || dataUrl.length < 100) {
+      showError('Capture la firma en el recuadro');
+      return;
+    }
+    try {
+      await api.post(`/work-orders/${id}/conformity-signature`, {
+        signatureData: dataUrl,
+        signedBy: signatureData.signedBy.trim()
+      });
+      showSuccess('Firma de conformidad registrada');
+      setShowSignatureModal(false);
+      fetchOrder();
+      if (activeTab === 'bitacora') fetchActivity();
+    } catch (error) {
+      showError(error.response?.data?.error || 'Error al guardar la firma');
     }
   };
 
@@ -271,16 +380,28 @@ export default function TechnicianWorkOrderDetail() {
         </div>
       </div>
 
-      <div className="status-actions">
-        {order.status === 'assigned' && (
-          <button onClick={() => handleStatusChange('in_progress')} className="btn-primary">
-            Iniciar Trabajo
-          </button>
-        )}
-        {order.status === 'in_progress' && (
-          <button onClick={() => handleStatusChange('completed')} className="btn-success">
-            Completar Orden
-          </button>
+      <div className="status-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+        <label style={{ fontWeight: 600, marginRight: 8 }}>Estado:</label>
+        <select
+          value={order.status}
+          onChange={(e) => handleStatusChange(e.target.value)}
+          className="status-select"
+          style={{ padding: '8px 12px', borderRadius: 6, minWidth: 160 }}
+        >
+          <option value="assigned">Asignada</option>
+          <option value="in_progress">En Proceso</option>
+          <option value="completed">Completada</option>
+          <option value="accepted">Aceptada</option>
+          <option value="on_hold">En Espera</option>
+          <option value="cancelled">Cancelada</option>
+        </select>
+        <button type="button" className="btn-primary" onClick={openSignatureModal} style={{ marginLeft: 8 }}>
+          Firma de conformidad
+        </button>
+        {order.conformity_signature && (
+          <span style={{ fontSize: 13, color: 'var(--text-light)' }}>
+            Firmado por {order.conformity_signature.signed_by_name} el {new Date(order.conformity_signature.signed_at).toLocaleString('es-PA')}
+          </span>
         )}
       </div>
 
@@ -299,6 +420,9 @@ export default function TechnicianWorkOrderDetail() {
         </button>
         <button className={activeTab === 'documents' ? 'active' : ''} onClick={() => setActiveTab('documents')}>
           Documentos
+        </button>
+        <button className={activeTab === 'bitacora' ? 'active' : ''} onClick={() => setActiveTab('bitacora')}>
+          Bitácora
         </button>
       </div>
 
@@ -664,7 +788,77 @@ export default function TechnicianWorkOrderDetail() {
             )}
           </div>
         )}
+
+        {activeTab === 'bitacora' && (
+          <div className="bitacora-section">
+            <h3>Bitácora de la OT</h3>
+            {loadingActivity ? (
+              <p className="empty-message">Cargando...</p>
+            ) : activityLog.length === 0 ? (
+              <p className="empty-message">No hay registros en la bitácora</p>
+            ) : (
+              <ul className="bitacora-list" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {activityLog.map((entry) => (
+                  <li key={entry.id} style={{ padding: '12px', borderBottom: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'baseline' }}>
+                    <span style={{ fontWeight: 600, minWidth: 140 }}>
+                      {new Date(entry.created_at).toLocaleString('es-PA')}
+                    </span>
+                    <span>{entry.description || entry.action}</span>
+                    {entry.user_name && (
+                      <span style={{ color: 'var(--text-light)', fontSize: '0.9em' }}>— {entry.user_name}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
+
+      {showSignatureModal && (
+        <div className="modal-overlay" onClick={() => setShowSignatureModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <h2>Firma de conformidad</h2>
+            <p style={{ marginTop: -8, marginBottom: 12, color: 'var(--text-light)', fontSize: 14 }}>
+              El supervisor del cliente debe firmar en el recuadro e indicar su nombre.
+            </p>
+            <div className="form-group">
+              <label>Nombre del supervisor del cliente *</label>
+              <input
+                type="text"
+                value={signatureData.signedBy}
+                onChange={(e) => setSignatureData((s) => ({ ...s, signedBy: e.target.value }))}
+                placeholder="Ej: Juan Pérez"
+              />
+            </div>
+            <div className="form-group">
+              <label>Firma</label>
+              <canvas
+                ref={signatureCanvasRef}
+                width={400}
+                height={180}
+                style={{ border: '1px solid #ccc', borderRadius: 6, touchAction: 'none', width: '100%', maxWidth: 400, height: 180 }}
+                onMouseDown={handleSignatureStart}
+                onMouseMove={handleSignatureMove}
+                onMouseUp={handleSignatureEnd}
+                onMouseLeave={handleSignatureEnd}
+                onTouchStart={(e) => { e.preventDefault(); handleSignatureStart(e.touches[0]); }}
+                onTouchMove={(e) => { e.preventDefault(); handleSignatureMove(e.touches[0]); }}
+                onTouchEnd={(e) => { e.preventDefault(); handleSignatureEnd(); }}
+              />
+              <button type="button" className="btn-secondary" onClick={clearSignature} style={{ marginTop: 8 }}>
+                Limpiar firma
+              </button>
+            </div>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setShowSignatureModal(false)}>Cancelar</button>
+              <button type="button" className="btn-primary" onClick={submitConformitySignature}>
+                Guardar firma
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showMeasurementModal && (
         <div className="modal-overlay" onClick={() => setShowMeasurementModal(false)}>

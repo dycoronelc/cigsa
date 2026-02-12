@@ -89,6 +89,8 @@
 .status-in_progress { background: #fef3c7; color: #92400e; }
 .status-completed { background: #d1fae5; color: #065f46; }
 .status-accepted { background: #e9d5ff; color: #6b21a8; }
+.status-on_hold { background: #e5e7eb; color: #374151; }
+.status-cancelled { background: #fee2e2; color: #991b1b; }
 
 .order-card h3 {
   margin: 0.5rem 0;

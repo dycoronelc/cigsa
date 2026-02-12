@@ -33,6 +33,8 @@ export default function WorkOrderDetail() {
   const [equipmentOptions, setEquipmentOptions] = useState([]);
   const [showHousingsModal, setShowHousingsModal] = useState(false);
   const [editingServiceIdx, setEditingServiceIdx] = useState(null);
+  const [activityLog, setActivityLog] = useState([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
 
   const isDocVisibleToTechnician = (d) => {
     const v = d?.is_visible_to_technician;
@@ -97,6 +99,22 @@ export default function WorkOrderDetail() {
       setLoading(false);
     }
   };
+
+  const fetchActivity = async () => {
+    setLoadingActivity(true);
+    try {
+      const res = await api.get(`/work-orders/${id}/activity`);
+      setActivityLog(res.data || []);
+    } catch (e) {
+      setActivityLog([]);
+    } finally {
+      setLoadingActivity(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'bitacora') fetchActivity();
+  }, [activeTab, id]);
 
   const toDateInputValue = (value) => {
     if (!value) return '';
@@ -281,6 +299,7 @@ export default function WorkOrderDetail() {
     try {
       await api.put(`/work-orders/${id}`, { status: newStatus });
       fetchOrder();
+      if (activeTab === 'bitacora') fetchActivity();
     } catch (error) {
       console.error('Error updating status:', error);
       showError('Error al actualizar el estado');
@@ -406,6 +425,12 @@ export default function WorkOrderDetail() {
         >
           Documentos
         </button>
+        <button
+          className={activeTab === 'bitacora' ? 'active' : ''}
+          onClick={() => setActiveTab('bitacora')}
+        >
+          Bitácora
+        </button>
       </div>
 
       <div className="detail-content">
@@ -424,6 +449,8 @@ export default function WorkOrderDetail() {
                   <option value="in_progress">En Proceso</option>
                   <option value="completed">Completada</option>
                   <option value="accepted">Aceptada</option>
+                  <option value="on_hold">En Espera</option>
+                  <option value="cancelled">Cancelada</option>
                 </select>
               </div>
 
@@ -966,6 +993,31 @@ export default function WorkOrderDetail() {
               </>
             ) : (
               <p className="empty-message">No hay documentos</p>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'bitacora' && (
+          <div className="bitacora-section">
+            <h3>Bitácora de la OT</h3>
+            {loadingActivity ? (
+              <p className="empty-message">Cargando...</p>
+            ) : activityLog.length === 0 ? (
+              <p className="empty-message">No hay registros en la bitácora</p>
+            ) : (
+              <ul className="bitacora-list" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {activityLog.map((entry) => (
+                  <li key={entry.id} style={{ padding: '12px', borderBottom: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'baseline' }}>
+                    <span style={{ fontWeight: 600, minWidth: 140 }}>
+                      {new Date(entry.created_at).toLocaleString('es-PA')}
+                    </span>
+                    <span>{entry.description || entry.action}</span>
+                    {entry.user_name && (
+                      <span style={{ color: 'var(--text-light)', fontSize: '0.9em' }}>— {entry.user_name}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         )}

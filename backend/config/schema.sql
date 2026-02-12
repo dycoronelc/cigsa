@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS work_orders (
   assigned_technician_id INT,
   title VARCHAR(200) NOT NULL,
   description TEXT,
-  status ENUM('created', 'assigned', 'in_progress', 'completed', 'accepted') DEFAULT 'created',
+  status ENUM('created', 'assigned', 'in_progress', 'completed', 'accepted', 'cancelled', 'on_hold') DEFAULT 'created',
   priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
   scheduled_date DATE,
   start_date DATETIME,
@@ -292,6 +292,16 @@ CREATE TABLE IF NOT EXISTS activity_log (
   ip_address VARCHAR(45),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Firma de conformidad del supervisor del cliente
+CREATE TABLE IF NOT EXISTS work_order_conformity_signatures (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  work_order_id INT NOT NULL,
+  signature_data TEXT NOT NULL,
+  signed_by_name VARCHAR(200) NOT NULL,
+  signed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
 );
 
 -- Indexes for better performance

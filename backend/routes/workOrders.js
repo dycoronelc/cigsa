@@ -298,6 +298,15 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (req.user?.role === 'technician') {
       documents = documents.filter((d) => isVisibleToTechnician(d.is_visible_to_technician));
     }
+
+    let conformitySignature = null;
+    try {
+      const [sigRows] = await pool.query(
+        'SELECT id, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ? ORDER BY signed_at DESC LIMIT 1',
+        [req.params.id]
+      );
+      conformitySignature = sigRows[0] || null;
+    } catch (e) { /* ignore */ }
     
     res.json({
       ...order,
@@ -306,7 +315,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
       measurements: measurementsWithHousing,
       photos,
       observations,
-      documents
+      documents,
+      conformity_signature: conformitySignature
     });
   } catch (error) {
     console.error('Get work order error:', error);
@@ -388,7 +398,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
       }
     }
     
-    await logActivity(req.user.id, 'CREATE', 'work_order', result.insertId, `Created work order ${orderNumber}`, req.ip);
+    await logActivity(req.user.id, 'CREATE', 'work_order', result.insertId, 'Orden creada', req.ip);
     
     res.status(201).json({ id: result.insertId, orderNumber, message: 'Work order created successfully' });
   } catch (error) {
@@ -438,9 +448,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
       
       updateValues.push(req.params.id);
       await pool.query(`UPDATE work_orders SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
-      
-      await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, `Updated work order status to ${status}`, req.ip);
-      
+      const statusDesc = { in_progress: 'Orden puesta en proceso', completed: 'Orden completada', accepted: 'Orden aceptada', on_hold: 'Orden puesta en espera', cancelled: 'Orden cancelada' };
+      const desc = statusDesc[status] || `Estado actualizado a ${status}`;
+      await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, desc, req.ip);
       return res.json({ message: 'Work order updated successfully' });
     }
     
@@ -543,9 +553,21 @@ router.put('/:id', authenticateToken, async (req, res) => {
     
     updateValues.push(req.params.id);
     await pool.query(`UPDATE work_orders SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
-    
-    await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, 'Updated work order', req.ip);
-    
+    if (status !== undefined) {
+      const statusDesc = { in_progress: 'Orden puesta en proceso', completed: 'Orden completada', accepted: 'Orden aceptada', on_hold: 'Orden puesta en espera', cancelled: 'Orden cancelada', assigned: 'Orden asignada', created: 'Orden creada' };
+      const desc = statusDesc[status] || `Estado actualizado a ${status}`;
+      if (assignedTechnicianId !== undefined && assignedTechnicianId) {
+        const [u] = await pool.query('SELECT full_name FROM users WHERE id = ?', [assignedTechnicianId]);
+        await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, `Orden asignada a ${u[0]?.full_name || 'técnico'}`, req.ip);
+      } else {
+        await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, desc, req.ip);
+      }
+    } else if (assignedTechnicianId !== undefined && assignedTechnicianId) {
+      const [u] = await pool.query('SELECT full_name FROM users WHERE id = ?', [assignedTechnicianId]);
+      await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, `Orden asignada a ${u[0]?.full_name || 'técnico'}`, req.ip);
+    } else {
+      await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, 'Orden actualizada', req.ip);
+    }
     res.json({ message: 'Work order updated successfully' });
   } catch (error) {
     console.error('Update work order error:', error);
@@ -792,21 +814,70 @@ router.post('/:id/documents', authenticateToken, upload.single('document'), asyn
   }
 });
 
-// Get activity log for work order
+// Get activity log for work order (Bitácora)
 router.get('/:id/activity', authenticateToken, async (req, res) => {
   try {
     const pool = await getConnection();
+    const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) return res.status(404).json({ error: 'Work order not found' });
+    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     const [logs] = await pool.query(`
       SELECT al.*, u.full_name as user_name
       FROM activity_log al
       LEFT JOIN users u ON al.user_id = u.id
       WHERE al.entity_type = 'work_order' AND al.entity_id = ?
-      ORDER BY al.created_at DESC
+      ORDER BY al.created_at ASC
     `, [req.params.id]);
-    
     res.json(logs);
   } catch (error) {
     console.error('Get activity log error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Firma de conformidad (supervisor del cliente)
+router.post('/:id/conformity-signature', authenticateToken, async (req, res) => {
+  try {
+    const { signatureData, signedBy } = req.body;
+    if (!signatureData || !signedBy || typeof signedBy !== 'string' || signedBy.trim() === '') {
+      return res.status(400).json({ error: 'Se requiere firma y nombre del supervisor' });
+    }
+    const pool = await getConnection();
+    const [orders] = await pool.query('SELECT id, assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) return res.status(404).json({ error: 'Work order not found' });
+    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    await pool.query(
+      'INSERT INTO work_order_conformity_signatures (work_order_id, signature_data, signed_by_name) VALUES (?, ?, ?)',
+      [req.params.id, signatureData, signedBy.trim()]
+    );
+    await logActivity(req.user.id, 'CONFORMITY_SIGNATURE', 'work_order', req.params.id, `Firma de conformidad por ${signedBy.trim()}`, req.ip);
+    res.status(201).json({ message: 'Firma de conformidad registrada' });
+  } catch (error) {
+    console.error('Conformity signature error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get conformity signature for work order
+router.get('/:id/conformity-signature', authenticateToken, async (req, res) => {
+  try {
+    const pool = await getConnection();
+    const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) return res.status(404).json({ error: 'Work order not found' });
+    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const [rows] = await pool.query(
+      'SELECT id, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ? ORDER BY signed_at DESC LIMIT 1',
+      [req.params.id]
+    );
+    res.json(rows[0] || null);
+  } catch (error) {
+    console.error('Get conformity signature error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

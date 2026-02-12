@@ -323,6 +323,37 @@ export const initDatabase = async () => {
       }
     }
 
+    // Extend work_orders.status enum to include cancelled and on_hold
+    try {
+      await pool.query(`
+        ALTER TABLE work_orders MODIFY COLUMN status ENUM(
+          'created', 'assigned', 'in_progress', 'completed', 'accepted', 'cancelled', 'on_hold'
+        ) DEFAULT 'created'
+      `);
+      console.log('Extended work_orders.status enum (cancelled, on_hold)');
+    } catch (error) {
+      const msg = error.sqlMessage || error.message || '';
+      if (!msg.includes('Duplicate') && !msg.includes('already exists') && !msg.includes('same as')) {
+        console.warn('Status enum migration:', msg);
+      }
+    }
+
+    // Firma de conformidad
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS work_order_conformity_signatures (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          work_order_id INT NOT NULL,
+          signature_data TEXT NOT NULL,
+          signed_by_name VARCHAR(200) NOT NULL,
+          signed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
+        )
+      `);
+    } catch (error) {
+      console.error('Error ensuring work_order_conformity_signatures:', error.sqlMessage || error.message);
+    }
+
     // Ensure work_order_housing_measurements table exists
     try {
       await pool.query(`

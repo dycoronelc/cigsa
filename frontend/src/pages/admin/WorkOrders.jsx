@@ -31,7 +31,9 @@ export default function WorkOrders() {
       assigned: { label: 'Asignada', class: 'badge-blue' },
       in_progress: { label: 'En Proceso', class: 'badge-yellow' },
       completed: { label: 'Completada', class: 'badge-green' },
-      accepted: { label: 'Aceptada', class: 'badge-purple' }
+      accepted: { label: 'Aceptada', class: 'badge-purple' },
+      on_hold: { label: 'En Espera', class: 'badge-gray' },
+      cancelled: { label: 'Cancelada', class: 'badge-red' }
     };
     return badges[status] || { label: status, class: 'badge-gray' };
   };
@@ -82,6 +84,8 @@ export default function WorkOrders() {
             <option value="in_progress">En Proceso</option>
             <option value="completed">Completada</option>
             <option value="accepted">Aceptada</option>
+            <option value="on_hold">En Espera</option>
+            <option value="cancelled">Cancelada</option>
           </select>
 
           <select
