@@ -67,6 +67,7 @@ export default function TechnicianWorkOrderDetail() {
   const [expandedPhoto, setExpandedPhoto] = useState(null);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [signatureData, setSignatureData] = useState({ signedBy: '', canvasRef: null });
+  const [existingSignature, setExistingSignature] = useState(null);
   const [activityLog, setActivityLog] = useState([]);
   const [loadingActivity, setLoadingActivity] = useState(false);
   const cameraInputRef = useRef(null);
@@ -142,9 +143,18 @@ export default function TechnicianWorkOrderDetail() {
     if (activeTab === 'bitacora') fetchActivity();
   }, [activeTab, id]);
 
-  const openSignatureModal = () => {
+  const openSignatureModal = async () => {
     setSignatureData({ signedBy: '' });
+    setExistingSignature(null);
     setShowSignatureModal(true);
+    if (order?.conformity_signature) {
+      try {
+        const res = await api.get(`/work-orders/${id}/conformity-signature`);
+        if (res.data?.signature_data) setExistingSignature(res.data);
+      } catch (e) {
+        setExistingSignature(null);
+      }
+    }
     setTimeout(() => {
       const canvas = signatureCanvasRef.current;
       if (canvas) {
@@ -819,9 +829,27 @@ export default function TechnicianWorkOrderDetail() {
         <div className="modal-overlay" onClick={() => setShowSignatureModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
             <h2>Firma de conformidad</h2>
-            <p style={{ marginTop: -8, marginBottom: 12, color: 'var(--text-light)', fontSize: 14 }}>
-              El supervisor del cliente debe firmar en el recuadro e indicar su nombre.
-            </p>
+            {existingSignature?.signature_data ? (
+              <div style={{ marginBottom: 20 }}>
+                <p style={{ marginBottom: 8, fontWeight: 600 }}>Firma registrada</p>
+                <img
+                  src={existingSignature.signature_data}
+                  alt="Firma de conformidad"
+                  style={{ maxWidth: '100%', height: 'auto', border: '1px solid #ddd', borderRadius: 6, background: '#fff' }}
+                />
+                <p style={{ marginTop: 8, color: 'var(--text-light)', fontSize: 14 }}>
+                  Firmado por <strong>{existingSignature.signed_by_name}</strong> el {new Date(existingSignature.signed_at).toLocaleString('es-PA')}
+                </p>
+                <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--border)' }} />
+                <p style={{ marginBottom: 12, color: 'var(--text-light)', fontSize: 14 }}>
+                  Puede registrar una nueva firma a continuación si lo desea.
+                </p>
+              </div>
+            ) : (
+              <p style={{ marginTop: -8, marginBottom: 12, color: 'var(--text-light)', fontSize: 14 }}>
+                El supervisor del cliente debe firmar en el recuadro e indicar su nombre.
+              </p>
+            )}
             <div className="form-group">
               <label>Nombre del supervisor del cliente *</label>
               <input
@@ -851,7 +879,7 @@ export default function TechnicianWorkOrderDetail() {
               </button>
             </div>
             <div className="modal-actions">
-              <button type="button" onClick={() => setShowSignatureModal(false)}>Cancelar</button>
+              <button type="button" onClick={() => setShowSignatureModal(false)}>Cerrar</button>
               <button type="button" className="btn-primary" onClick={submitConformitySignature}>
                 Guardar firma
               </button>

@@ -872,7 +872,7 @@ router.get('/:id/conformity-signature', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
     const [rows] = await pool.query(
-      'SELECT id, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ? ORDER BY signed_at DESC LIMIT 1',
+      'SELECT id, signature_data, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ? ORDER BY signed_at DESC LIMIT 1',
       [req.params.id]
     );
     res.json(rows[0] || null);
