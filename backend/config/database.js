@@ -344,6 +344,38 @@ export const initDatabase = async () => {
       }
     }
 
+    // Si work_order_housings ya tiene work_order_service_id pero sigue el índice antiguo, cambiarlo
+    // (permite varios servicios con medida 'A' cada uno)
+    try {
+      const [hasColumn] = await pool.query(`
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_order_housings' AND COLUMN_NAME = 'work_order_service_id'
+      `, [dbName]);
+      if (hasColumn.length > 0) {
+        const [oldIndex] = await pool.query(`
+          SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_order_housings' AND INDEX_NAME = 'unique_work_order_measure_code'
+        `, [dbName]);
+        if (oldIndex.length > 0) {
+          await pool.query('ALTER TABLE work_order_housings DROP INDEX unique_work_order_measure_code');
+          console.log('Dropped old unique_work_order_measure_code from work_order_housings');
+        }
+        const [newIndex] = await pool.query(`
+          SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_order_housings' AND INDEX_NAME = 'unique_work_order_service_measure'
+        `, [dbName]);
+        if (newIndex.length === 0) {
+          await pool.query('ALTER TABLE work_order_housings ADD UNIQUE KEY unique_work_order_service_measure (work_order_service_id, measure_code)');
+          console.log('Added unique_work_order_service_measure to work_order_housings');
+        }
+      }
+    } catch (error) {
+      const msg = error.sqlMessage || error.message || '';
+      if (!msg.includes('Duplicate') && !msg.includes('already exists')) {
+        console.warn('Migration work_order_housings unique key:', msg);
+      }
+    }
+
     // Extend work_orders.status enum to include cancelled and on_hold
     try {
       await pool.query(`
