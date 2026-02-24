@@ -357,6 +357,13 @@ export const initDatabase = async () => {
           WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_order_housings' AND INDEX_NAME = 'unique_work_order_measure_code'
         `, [dbName]);
         if (oldIndex.length > 0) {
+          // MySQL no permite borrar un índice que usa una FK. Crear antes un índice en work_order_id
+          // para que la FK work_order_id -> work_orders(id) no dependa del único.
+          try {
+            await pool.query('CREATE INDEX idx_work_order_housings_wo_id ON work_order_housings(work_order_id)');
+          } catch (e) {
+            if (!(e.sqlMessage || '').includes('Duplicate key name')) throw e;
+          }
           await pool.query('ALTER TABLE work_order_housings DROP INDEX unique_work_order_measure_code');
           console.log('Dropped old unique_work_order_measure_code from work_order_housings');
         }
