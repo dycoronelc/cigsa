@@ -178,6 +178,27 @@ export const initDatabase = async () => {
       }
     }
 
+    // Add client_service_order_number column to work_orders if it doesn't exist
+    try {
+      const dbName = process.env.DB_NAME || 'cigsa_db';
+      const [cols] = await pool.query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = 'work_orders'
+        AND COLUMN_NAME = 'client_service_order_number'
+      `, [dbName]);
+
+      if (cols.length === 0) {
+        await pool.query('ALTER TABLE work_orders ADD COLUMN client_service_order_number VARCHAR(50) NULL COMMENT \'N° Orden de Servicio del Cliente\' AFTER service_location');
+        console.log('Added client_service_order_number column to work_orders table');
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error adding client_service_order_number column:', error.message);
+      }
+    }
+
     // Ensure work_order_services table exists (múltiples servicios por OT)
     try {
       await pool.query(`
