@@ -343,7 +343,8 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
     
     // Generate order number
     const [count] = await pool.query('SELECT COUNT(*) as count FROM work_orders');
-    const orderNumber = `OT-${String(count[0].count + 1).padStart(6, '0')}`;
+    const nextNum = Number(count[0]?.count ?? 0) + 1;
+    const orderNumber = `OT-${String(nextNum).padStart(6, '0')}`;
     
     const [result] = await pool.query(
       `INSERT INTO work_orders 
@@ -377,7 +378,11 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
         const wosId = wosRes.insertId;
         const housings = Array.isArray(s.housings) ? s.housings : [];
         if (housings.length > 0) {
-          const values = housings.map((h) => ([
+          const hasMeasureCode = (h) => (h.measureCode || h.measure_code || '').toString().trim();
+          if (housings.some(h => !hasMeasureCode(h))) {
+            return res.status(400).json({ error: 'Cada alojamiento debe tener un campo Medida (A, B, C...)' });
+          }
+          const valuesNew = housings.map((h) => ([
             result.insertId,
             wosId,
             h.measureCode || h.measure_code || null,
@@ -386,14 +391,31 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
             h.unit || h.nominalUnit || h.nominal_unit || null,
             h.tolerance || null
           ]));
-          if (values.some(v => !v[2])) {
-            return res.status(400).json({ error: 'Cada alojamiento debe tener un campo Medida (A, B, C...)' });
+          try {
+            await pool.query(
+              `INSERT INTO work_order_housings (work_order_id, work_order_service_id, measure_code, description, nominal_value, nominal_unit, tolerance)
+               VALUES ?`,
+              [valuesNew]
+            );
+          } catch (housingsErr) {
+            if (housingsErr.code === 'ER_BAD_FIELD_ERROR' && housingsErr.sqlMessage && housingsErr.sqlMessage.includes('work_order_service_id')) {
+              const valuesOld = housings.map((h) => ([
+                result.insertId,
+                h.measureCode || h.measure_code || null,
+                h.description || null,
+                h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? h.nominalValue : null,
+                h.unit || h.nominalUnit || h.nominal_unit || null,
+                h.tolerance || null
+              ]));
+              await pool.query(
+                `INSERT INTO work_order_housings (work_order_id, measure_code, description, nominal_value, nominal_unit, tolerance)
+                 VALUES ?`,
+                [valuesOld]
+              );
+            } else {
+              throw housingsErr;
+            }
           }
-          await pool.query(
-            `INSERT INTO work_order_housings (work_order_id, work_order_service_id, measure_code, description, nominal_value, nominal_unit, tolerance)
-             VALUES ?`,
-            [values]
-          );
         }
       }
     }
@@ -403,7 +425,8 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
     res.status(201).json({ id: result.insertId, orderNumber, message: 'Work order created successfully' });
   } catch (error) {
     console.error('Create work order error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    const msg = error.sqlMessage || error.message || 'Internal server error';
+    res.status(500).json({ error: msg });
   }
 });
 
