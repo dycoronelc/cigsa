@@ -230,6 +230,162 @@ npm run build
 
 El build se generará en `frontend/dist` y estará listo para desplegar como PWA.
 
+---
+
+## Despliegue en producción (GitHub + DigitalOcean)
+
+Pasos para publicar el código en GitHub y actualizar la aplicación en el servidor de DigitalOcean (IP: **165.245.137.48**).
+
+### 1. Subir el código a GitHub
+
+#### 1.1 Crear el repositorio en GitHub (si aún no existe)
+
+1. Entra en [GitHub](https://github.com) e inicia sesión.
+2. Clic en **New repository**.
+3. Nombre del repositorio (ej: `cigsa`).
+4. Elige **Private** o **Public**.
+5. No marques "Add a README" si ya tienes el proyecto local.
+6. Clic en **Create repository**.
+
+#### 1.2 Inicializar Git y subir el código (desde tu máquina local)
+
+Abre una terminal en la carpeta del proyecto (`c:\react\cigsa` o la ruta donde está el código):
+
+```bash
+# Ir a la carpeta del proyecto
+cd c:\react\cigsa
+
+# Si Git no está inicializado
+git init
+
+# Añadir el remoto (sustituye TU_USUARIO y TU_REPO por tu usuario y nombre del repo)
+git remote add origin https://github.com/TU_USUARIO/TU_REPO.git
+
+# Si ya tenías un remoto y quieres cambiarlo
+# git remote set-url origin https://github.com/TU_USUARIO/TU_REPO.git
+
+# Ver la rama actual (suele ser main o master)
+git branch
+
+# Añadir todos los archivos, hacer commit y subir
+git add .
+git status
+git commit -m "Actualización: descripción de los cambios"
+git push -u origin main
+```
+
+Si tu rama se llama `master` en lugar de `main`:
+
+```bash
+git push -u origin master
+```
+
+> **Nota:** Si pide usuario y contraseña, usa un [Personal Access Token](https://github.com/settings/tokens) de GitHub en lugar de la contraseña.
+
+---
+
+### 2. Conectarse al servidor en DigitalOcean
+
+Desde tu máquina (PowerShell o terminal):
+
+```bash
+ssh root@165.245.137.48
+```
+
+O con un usuario distinto de `root`:
+
+```bash
+ssh usuario@165.245.137.48
+```
+
+- La primera vez te pedirá confirmar la huella del servidor (escribe `yes`).
+- Luego la contraseña del usuario (o usa clave SSH si la tienes configurada).
+
+Cuando veas un prompt como `root@nombre-servidor:~#`, ya estás dentro del servidor.
+
+---
+
+### 3. Actualizar los archivos en el servidor
+
+Una vez conectado por SSH al servidor:
+
+#### Opción A: Usar el script de despliegue (recomendado)
+
+```bash
+cd /var/www/cigsa
+./deploy.sh
+```
+
+El script hace:
+
+- `git fetch` y `git pull` (trae los últimos cambios de GitHub).
+- En `backend`: `npm install` y `pm2 restart cigsa-backend`.
+- En `frontend`: `npm install` y `npm run build`.
+
+#### Opción B: Pasos manuales
+
+```bash
+# 1. Ir al directorio del proyecto
+cd /var/www/cigsa
+
+# 2. Traer los últimos cambios de GitHub
+git fetch --all
+git pull origin main
+# (usa master si tu rama se llama así: git pull origin master)
+
+# 3. Backend: instalar dependencias y reiniciar
+cd backend
+npm install
+pm2 restart cigsa-backend
+cd ..
+
+# 4. Frontend: instalar dependencias y construir
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+---
+
+### 4. Comprobar que todo funciona
+
+En el servidor:
+
+```bash
+# Estado del backend
+pm2 list
+pm2 logs cigsa-backend --lines 20
+
+# Health check del API
+curl -sS http://127.0.0.1:3001/api/health
+```
+
+En el navegador:
+
+- **Frontend:** `http://165.245.137.48`
+- **API:** `http://165.245.137.48/api/health`
+
+---
+
+### 5. Resumen rápido (después del primer despliegue)
+
+| Dónde        | Qué hacer |
+|-------------|-----------|
+| **Tu PC**   | Hacer cambios → `git add .` → `git commit -m "mensaje"` → `git push origin main` |
+| **Servidor**| `ssh root@165.245.137.48` → `cd /var/www/cigsa` → `./deploy.sh` |
+
+---
+
+### 6. Problemas frecuentes
+
+- **"Permission denied" al hacer `git pull`:** En el servidor, asegúrate de que la clave SSH o el token estén configurados para ese repositorio, o usa HTTPS con usuario y token.
+- **"pm2: command not found":** Instala PM2: `npm install -g pm2`.
+- **Backend no arranca:** Revisa `pm2 logs cigsa-backend` y el archivo `.env` en `backend/` (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, JWT_SECRET).
+- **Cambios en la base de datos:** Al iniciar, el backend ejecuta migraciones. Reiniciar con `pm2 restart cigsa-backend` suele ser suficiente para aplicar cambios de esquema.
+
+---
+
 ## Notas Importantes
 
 1. **Seguridad**: Cambia el `JWT_SECRET` en producción por un valor seguro y aleatorio.

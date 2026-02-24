@@ -292,7 +292,15 @@ export const initDatabase = async () => {
         } catch (fkErr) {
           if (!fkErr.sqlMessage?.includes('Duplicate')) console.warn('FK work_order_service_id:', fkErr.message);
         }
-        // Migrar housings legacy: asignar a work_order_services
+        // Crear índice en work_order_id antes de borrar el único, para que la FK no dependa de él
+        try {
+          await pool.query('CREATE INDEX idx_work_order_housings_wo_id ON work_order_housings(work_order_id)');
+        } catch (e) {
+          if (!(e.sqlMessage || '').includes('Duplicate key name')) console.warn('idx_work_order_housings_wo_id:', e.message);
+        }
+        try {
+          await pool.query('ALTER TABLE work_order_housings DROP INDEX unique_work_order_measure_code');
+        } catch (e) { /* puede no existir o estar en uso por FK */ }
         const [legacyWoIds] = await pool.query(`
           SELECT DISTINCT work_order_id FROM work_order_housings WHERE work_order_service_id IS NULL
         `);

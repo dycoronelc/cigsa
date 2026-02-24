@@ -346,26 +346,41 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
     const nextNum = Number(count[0]?.count ?? 0) + 1;
     const orderNumber = `OT-${String(nextNum).padStart(6, '0')}`;
     
-    const [result] = await pool.query(
-      `INSERT INTO work_orders 
-       (order_number, client_id, equipment_id, service_location, client_service_order_number, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        orderNumber,
-        clientId,
-        equipmentId,
-        serviceLocation || null,
-        clientServiceOrderNumber || null,
-        totalHousingCount,
-        assignedTechnicianId || null,
-        title,
-        description || null,
-        priority || 'medium',
-        scheduledDate || null,
-        req.user.id,
-        assignedTechnicianId ? 'assigned' : 'created'
-      ]
-    );
+    const woValues = [
+      orderNumber,
+      clientId,
+      equipmentId,
+      serviceLocation || null,
+      clientServiceOrderNumber || null,
+      totalHousingCount,
+      assignedTechnicianId || null,
+      title,
+      description || null,
+      priority || 'medium',
+      scheduledDate || null,
+      req.user.id,
+      assignedTechnicianId ? 'assigned' : 'created'
+    ];
+    let result;
+    try {
+      [result] = await pool.query(
+        `INSERT INTO work_orders 
+         (order_number, client_id, equipment_id, service_location, client_service_order_number, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        woValues
+      );
+    } catch (woErr) {
+      if (woErr.code === 'ER_BAD_FIELD_ERROR' && woErr.sqlMessage && woErr.sqlMessage.includes('client_service_order_number')) {
+        [result] = await pool.query(
+          `INSERT INTO work_orders 
+           (order_number, client_id, equipment_id, service_location, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [orderNumber, clientId, equipmentId, serviceLocation || null, totalHousingCount, assignedTechnicianId || null, title, description || null, priority || 'medium', scheduledDate || null, req.user.id, assignedTechnicianId ? 'assigned' : 'created']
+        );
+      } else {
+        throw woErr;
+      }
+    }
 
     // Insert work_order_services y housings por cada servicio
     if (servicesList.length > 0) {
