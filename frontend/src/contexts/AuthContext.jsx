@@ -1,11 +1,15 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import api from '../services/api';
 
 const AuthContext = createContext(null);
 
+const INACTIVITY_MINUTES = 20;
+const INACTIVITY_MS = INACTIVITY_MINUTES * 60 * 1000;
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const inactivityTimerRef = useRef(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -18,6 +22,27 @@ export function AuthProvider({ children }) {
       setLoading(false);
     }
   }, []);
+
+  const resetInactivityTimer = () => {
+    if (!user) return;
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    inactivityTimerRef.current = setTimeout(() => {
+      inactivityTimerRef.current = null;
+      window.alert('Por inactividad de más de ' + INACTIVITY_MINUTES + ' minutos, su sesión ha expirado. Debe iniciar sesión nuevamente.');
+      logout();
+    }, INACTIVITY_MS);
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    resetInactivityTimer();
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    events.forEach((ev) => window.addEventListener(ev, resetInactivityTimer));
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, resetInactivityTimer));
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    };
+  }, [user]);
 
   const fetchUser = async () => {
     try {
@@ -49,6 +74,10 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+      inactivityTimerRef.current = null;
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     delete api.defaults.headers.common['Authorization'];

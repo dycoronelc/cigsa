@@ -611,6 +611,10 @@ export default function WorkOrderDetail() {
                               });
                               next[idx] = { ...next[idx], housingCount: e.target.value, housings: newHousings };
                               setEditData({ ...editData, services: next });
+                              if (count > 0) {
+                                setEditingServiceIdx(idx);
+                                setShowHousingsModal(true);
+                              }
                             }}
                             placeholder="0"
                           />
