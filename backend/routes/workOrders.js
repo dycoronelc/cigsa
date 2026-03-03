@@ -142,11 +142,13 @@ router.get('/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
     
-    // Get measurements
-    const [measurements] = await pool.query(
-      'SELECT * FROM measurements WHERE work_order_id = ? ORDER BY measurement_date',
-      [req.params.id]
+    // Get measurements (initial and final) — ensure work_order_id is integer for consistent query
+    const workOrderId = parseInt(req.params.id, 10);
+    const [measurementsRows] = await pool.query(
+      'SELECT id, work_order_id, measurement_type, measurement_date, temperature, pressure, voltage, current, resistance, other_measurements, notes, taken_by, created_at FROM measurements WHERE work_order_id = ? ORDER BY measurement_date',
+      [workOrderId]
     );
+    const measurements = measurementsRows || [];
 
     // Get service housings (flat list para mediciones; también por servicio)
     let serviceHousings = [];
@@ -187,7 +189,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
         JOIN measurements m ON wohm.measurement_id = m.id
         WHERE m.work_order_id = ?
         ORDER BY woh.id
-      `, [req.params.id]);
+      `, [workOrderId]);
 
       (rows || []).forEach((r) => {
         const key = r.measurement_id;
@@ -201,8 +203,21 @@ router.get('/:id', authenticateToken, async (req, res) => {
       housingMeasurementsByMeasurementId = new Map();
     }
 
-    const measurementsWithHousing = (measurements || []).map((m) => ({
-      ...m,
+    // Build measurements with housing_measurements; ensure measurement_type and all keys are plain for JSON
+    const measurementsWithHousing = measurements.map((m) => ({
+      id: m.id,
+      work_order_id: m.work_order_id,
+      measurement_type: m.measurement_type,
+      measurement_date: m.measurement_date,
+      temperature: m.temperature,
+      pressure: m.pressure,
+      voltage: m.voltage,
+      current: m.current,
+      resistance: m.resistance,
+      other_measurements: m.other_measurements,
+      notes: m.notes,
+      taken_by: m.taken_by,
+      created_at: m.created_at,
       housing_measurements: housingMeasurementsByMeasurementId.get(m.id) || []
     }));
     

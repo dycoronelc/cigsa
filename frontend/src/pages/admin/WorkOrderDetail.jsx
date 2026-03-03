@@ -341,8 +341,8 @@ export default function WorkOrderDetail() {
     return <div className="error">Orden no encontrada</div>;
   }
 
-  const initialMeasurements = order.measurements?.filter(m => m.measurement_type === 'initial') || [];
-  const finalMeasurements = order.measurements?.filter(m => m.measurement_type === 'final') || [];
+  const initialMeasurements = order.measurements?.filter(m => (m.measurement_type || m.measurementType) === 'initial') || [];
+  const finalMeasurements = order.measurements?.filter(m => (m.measurement_type || m.measurementType) === 'final') || [];
 
   // Calcular días trabajados
   const calculateWorkingDays = () => {
