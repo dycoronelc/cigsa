@@ -218,13 +218,20 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
     };
 
     const pdfBuffer = await generateWorkOrderReport(payload);
+    if (!pdfBuffer || !Buffer.isBuffer(pdfBuffer)) {
+      console.error('Work order report: invalid buffer');
+      return res.status(500).json({ error: 'Error al generar el reporte PDF' });
+    }
     const filename = `OT-${(order.order_number || order.id).toString().replace(/\s/g, '-')}-reporte.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(pdfBuffer);
   } catch (error) {
-    console.error('Work order report error:', error);
-    res.status(500).json({ error: 'Error al generar el reporte PDF' });
+    console.error('Work order report error:', error?.message || error);
+    if (error?.stack) console.error(error.stack);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Error al generar el reporte PDF' });
+    }
   }
 });
 

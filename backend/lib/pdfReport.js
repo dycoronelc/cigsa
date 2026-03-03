@@ -23,8 +23,50 @@ const CONTENT_BOTTOM = PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT;
 const RUC = '179308-1-391832 D.V. 47';
 const FOOTER_TEXT = 'Tel.: (+507) 996-1391 / 9772  -  e-mail: cigsa@cigonzalez.com  -  www.cigsapanama.com  -  Chitré - Herrera - Panamá';
 
-const logoPath = path.join(__dirname, '..', 'assets', 'logo.png');
-const hasLogo = fs.existsSync(logoPath);
+function getLogoPath() {
+  return path.join(__dirname, '..', 'assets', 'logo.png');
+}
+
+/** Dibuja el encabezado (logo, nombre, RUC, cajas día/mes/año) con borde. */
+function drawHeader(doc, reportDate) {
+  const y = MARGIN;
+
+  doc.rect(MARGIN, y, CONTENT_WIDTH, HEADER_HEIGHT).stroke();
+
+  const boxY = y + 8;
+  let logoDrawn = false;
+  try {
+    const lp = getLogoPath();
+    if (fs.existsSync(lp)) {
+      doc.image(lp, MARGIN + 6, boxY, { width: 72, height: 36 });
+      logoDrawn = true;
+    }
+  } catch (_) {
+    /* fallback to text */
+  }
+  if (!logoDrawn) {
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a237e').text('CIGSA', MARGIN + 8, boxY);
+    doc.fontSize(8).font('Helvetica').fillColor('#333').text('Welding and Machining', MARGIN + 8, boxY + 20);
+  }
+
+  doc.fontSize(10).font('Helvetica-Bold').fillColor('black');
+  doc.text('CENTRO INDUSTRIAL GONZALEZ – CIGSA', MARGIN + 100, boxY, { width: 220, align: 'center' });
+  doc.font('Helvetica').fontSize(9);
+  doc.text('Tornería de precisión - Hojalatería', MARGIN + 100, boxY + 12, { width: 220, align: 'center' });
+  doc.text('Soldadura Especializada', MARGIN + 100, boxY + 24, { width: 220, align: 'center' });
+
+  doc.font('Helvetica').fontSize(8).fillColor('#333');
+  doc.text(`RUC: ${RUC}`, PAGE_WIDTH - MARGIN - 120, boxY, { width: 114, align: 'right' });
+
+  const boxW = 32;
+  const boxX = PAGE_WIDTH - MARGIN - 3 * boxW - 8;
+  doc.rect(boxX, boxY + 14, boxW, 18).stroke();
+  doc.rect(boxX + boxW + 2, boxY + 14, boxW, 18).stroke();
+  doc.rect(boxX + 2 * (boxW + 2), boxY + 14, boxW + 4, 18).stroke();
+  doc.font('Helvetica').fontSize(10).fillColor('black').text(reportDate.day, boxX, boxY + 18, { width: boxW, align: 'center' });
+  doc.text(reportDate.month, boxX + boxW + 2, boxY + 18, { width: boxW, align: 'center' });
+  doc.text(reportDate.year, boxX + 2 * (boxW + 2), boxY + 18, { width: boxW + 4, align: 'center' });
+}
 
 function formatDate(d) {
   if (!d) return '-';
@@ -55,42 +97,6 @@ function getReportDate(order) {
     month: String(date.getMonth() + 1).padStart(2, '0'),
     year: String(date.getFullYear())
   };
-}
-
-/** Dibuja el encabezado (logo, nombre, RUC, cajas día/mes/año) con borde. */
-function drawHeader(doc, reportDate) {
-  const y = MARGIN;
-  const headerBottom = y + HEADER_HEIGHT;
-
-  doc.rect(MARGIN, y, CONTENT_WIDTH, HEADER_HEIGHT).stroke();
-
-  const boxY = y + 8;
-  if (hasLogo) {
-    try {
-      doc.image(logoPath, MARGIN + 6, boxY, { width: 72, height: 36 });
-    } catch (_) {}
-  } else {
-    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a237e').text('CIGSA', MARGIN + 8, boxY);
-    doc.fontSize(8).font('Helvetica').fillColor('#333').text('Welding and Machining', MARGIN + 8, boxY + 20);
-  }
-
-  doc.fontSize(10).font('Helvetica-Bold').fillColor('black');
-  doc.text('CENTRO INDUSTRIAL GONZALEZ – CIGSA', MARGIN + 100, boxY, { width: 220, align: 'center' });
-  doc.font('Helvetica').fontSize(9);
-  doc.text('Tornería de precisión - Hojalatería', MARGIN + 100, boxY + 12, { width: 220, align: 'center' });
-  doc.text('Soldadura Especializada', MARGIN + 100, boxY + 24, { width: 220, align: 'center' });
-
-  doc.font('Helvetica').fontSize(8).fillColor('#333');
-  doc.text(`RUC: ${RUC}`, PAGE_WIDTH - MARGIN - 120, boxY, { width: 114, align: 'right' });
-
-  const boxW = 32;
-  const boxX = PAGE_WIDTH - MARGIN - 3 * boxW - 8;
-  doc.rect(boxX, boxY + 14, boxW, 18).stroke();
-  doc.rect(boxX + boxW + 2, boxY + 14, boxW, 18).stroke();
-  doc.rect(boxX + 2 * (boxW + 2), boxY + 14, boxW + 4, 18).stroke();
-  doc.font('Helvetica').fontSize(10).fillColor('black').text(reportDate.day, boxX, boxY + 18, { width: boxW, align: 'center' });
-  doc.text(reportDate.month, boxX + boxW + 2, boxY + 18, { width: boxW, align: 'center' });
-  doc.text(reportDate.year, boxX + 2 * (boxW + 2), boxY + 18, { width: boxW + 4, align: 'center' });
 }
 
 /** Dibuja el pie de página con datos de contacto. */
