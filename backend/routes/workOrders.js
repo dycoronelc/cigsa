@@ -6,7 +6,6 @@ import { fileURLToPath } from 'url';
 import { getConnection } from '../config/database.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { activityLogger, logActivity } from '../middleware/logger.js';
-import { generateWorkOrderReport } from '../lib/pdfReport.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -217,6 +216,7 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       documents: documents || []
     };
 
+    const { generateWorkOrderReport } = await import('../lib/pdfReport.js');
     const pdfBuffer = await generateWorkOrderReport(payload);
     if (!pdfBuffer || !Buffer.isBuffer(pdfBuffer)) {
       console.error('Work order report: invalid buffer');

@@ -383,6 +383,7 @@ En el navegador:
 - **"pm2: command not found":** Instala PM2: `npm install -g pm2`.
 - **Backend no arranca:** Revisa `pm2 logs cigsa-backend` y el archivo `.env` en `backend/` (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, JWT_SECRET).
 - **Cambios en la base de datos:** Al iniciar, el backend ejecuta migraciones. Reiniciar con `pm2 restart cigsa-backend` suele ser suficiente para aplicar cambios de esquema.
+- **Aviso "loaded over an insecure connection" al descargar el reporte PDF:** Aparece porque la aplicación se sirve por HTTP. La descarga funciona igual. Para quitar el aviso, sirve el sitio por HTTPS (certificado SSL en Nginx, p. ej. con [Certbot/Let's Encrypt](https://certbot.eff.org/)).
 
 ---
 

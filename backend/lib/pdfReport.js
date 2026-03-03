@@ -19,6 +19,8 @@ const HEADER_HEIGHT = 52;
 const FOOTER_HEIGHT = 40;
 const CONTENT_TOP = MARGIN + HEADER_HEIGHT;
 const CONTENT_BOTTOM = PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT;
+/** Espacio entre la línea del encabezado y el título del reporte */
+const TITLE_MARGIN_BELOW_HEADER = 12;
 
 const RUC = '179308-1-391832 D.V. 47';
 const FOOTER_TEXT = 'Tel.: (+507) 996-1391 / 9772  -  e-mail: cigsa@cigonzalez.com  -  www.cigsapanama.com  -  Chitré - Herrera - Panamá';
@@ -99,16 +101,28 @@ function getReportDate(order) {
   };
 }
 
-/** Dibuja el pie de página con datos de contacto. */
+/** Dibuja el pie de página con datos de contacto (en la página actual, al final). */
 function drawFooter(doc) {
-  const y = PAGE_HEIGHT - FOOTER_HEIGHT + 8;
+  const y = PAGE_HEIGHT - FOOTER_HEIGHT;
+  doc.strokeColor('#ccc').lineWidth(0.5).moveTo(MARGIN, y - 6).lineTo(PAGE_WIDTH - MARGIN, y - 6).stroke();
   doc.font('Helvetica').fontSize(8).fillColor('#555');
   doc.text(FOOTER_TEXT, MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
 }
 
+/**
+ * Si no hay espacio suficiente, dibuja el pie, añade página y encabezado. Devuelve la y para seguir.
+ */
+function ensureSpace(doc, reportDate, currentY, neededHeight) {
+  if (currentY + neededHeight <= CONTENT_BOTTOM) return currentY;
+  drawFooter(doc);
+  doc.addPage();
+  drawHeader(doc, reportDate);
+  return CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
+}
+
 export async function generateWorkOrderReport(orderData) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'LETTER', margin: MARGIN });
+    const doc = new PDFDocument({ size: 'LETTER', margin: MARGIN, bufferPages: true });
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -129,6 +143,7 @@ export async function generateWorkOrderReport(orderData) {
     // ----- PÁGINA 1 -----
     drawHeader(doc, reportDate);
 
+    y += TITLE_MARGIN_BELOW_HEADER;
     doc.fontSize(11).font('Helvetica-Bold').fillColor('black').text('REPORTE DE ORDEN DE TRABAJO', MARGIN, y);
     y += 22;
 
@@ -171,23 +186,33 @@ export async function generateWorkOrderReport(orderData) {
     }
     y += 8;
 
+    const tableEstimatedHeight = 20 + services.length * 28 + 20;
+    y = ensureSpace(doc, reportDate, y, tableEstimatedHeight);
+
     doc.font('Helvetica-Bold').fontSize(9);
     doc.rect(MARGIN, y, CONTENT_WIDTH, 18).fillAndStroke('#eee', '#333');
     doc.fillColor('black').text('Servicio', MARGIN + 8, y + 4, { width: 280 });
     doc.text('Aloj. cotizados', MARGIN + 290, y + 4, { width: 80 });
     doc.text('Aloj. ejecutados', MARGIN + 372, y + 4);
     y += 20;
-    doc.font('Helvetica').fillColor('black');
+    doc.font('Helvetica').fontSize(9).fillColor('black');
+    const serviceColWidth = 280;
     services.forEach((svc) => {
       const cot = svc.housing_count || 0;
       const ejec = (svc.housings && svc.housings.length) || 0;
-      doc.rect(MARGIN, y, CONTENT_WIDTH, 16).stroke();
-      doc.text(svc.service_name || svc.service_code || '-', MARGIN + 8, y + 4, { width: 280 });
-      doc.text(String(cot), MARGIN + 290, y + 4, { width: 80 });
-      doc.text(String(ejec), MARGIN + 372, y + 4);
-      y += 16;
+      const name = svc.service_name || svc.service_code || '-';
+      const nameHeight = doc.heightOfString(name, { width: serviceColWidth });
+      const rowHeight = Math.max(20, Math.ceil(nameHeight) + 10);
+      doc.rect(MARGIN, y, CONTENT_WIDTH, rowHeight).stroke();
+      doc.text(name, MARGIN + 8, y + 5, { width: serviceColWidth });
+      doc.text(String(cot), MARGIN + 290, y + 5, { width: 80 });
+      doc.text(String(ejec), MARGIN + 372, y + 5);
+      y += rowHeight;
     });
     y += 16;
+
+    const fotosPlanosHeight = 80;
+    y = ensureSpace(doc, reportDate, y, fotosPlanosHeight);
 
     doc.font('Helvetica-Bold').text('Fotos', MARGIN, y);
     y += 12;
@@ -196,6 +221,8 @@ export async function generateWorkOrderReport(orderData) {
 
     const blueprints = documents.filter((d) => d.document_type === 'blueprint' || (d.file_name && /\.(pdf|png|jpg|jpeg)$/i.test(d.file_name)));
     if (blueprints.length > 0) {
+      const planosHeight = 20 + Math.min(blueprints.length, 5) * 14 + 20;
+      y = ensureSpace(doc, reportDate, y, planosHeight);
       doc.font('Helvetica-Bold').text('Planos / Documentos', MARGIN, y);
       y += 12;
       doc.font('Helvetica');
