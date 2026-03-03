@@ -203,23 +203,26 @@ router.get('/:id', authenticateToken, async (req, res) => {
       housingMeasurementsByMeasurementId = new Map();
     }
 
-    // Build measurements with housing_measurements; ensure measurement_type and all keys are plain for JSON
-    const measurementsWithHousing = measurements.map((m) => ({
-      id: m.id,
-      work_order_id: m.work_order_id,
-      measurement_type: m.measurement_type,
-      measurement_date: m.measurement_date,
-      temperature: m.temperature,
-      pressure: m.pressure,
-      voltage: m.voltage,
-      current: m.current,
-      resistance: m.resistance,
-      other_measurements: m.other_measurements,
-      notes: m.notes,
-      taken_by: m.taken_by,
-      created_at: m.created_at,
-      housing_measurements: housingMeasurementsByMeasurementId.get(m.id) || []
-    }));
+    // Build measurements with housing_measurements; ensure measurement_type is always lowercase for frontend
+    const measurementsWithHousing = measurements.map((m) => {
+      const rawType = String(m.measurement_type ?? m.measurementType ?? '').toLowerCase();
+      return {
+        id: m.id,
+        work_order_id: m.work_order_id,
+        measurement_type: rawType,
+        measurement_date: m.measurement_date,
+        temperature: m.temperature,
+        pressure: m.pressure,
+        voltage: m.voltage,
+        current: m.current,
+        resistance: m.resistance,
+        other_measurements: m.other_measurements,
+        notes: m.notes,
+        taken_by: m.taken_by,
+        created_at: m.created_at,
+        housing_measurements: housingMeasurementsByMeasurementId.get(m.id) || []
+      };
+    });
     
     // Get photos
     const [photos] = await pool.query(
@@ -327,10 +330,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
       ...order,
       services: orderServices,
       service_housings: serviceHousings,
-      measurements: measurementsWithHousing,
-      photos,
-      observations,
-      documents,
+      measurements: Array.isArray(measurementsWithHousing) ? measurementsWithHousing : [],
+      photos: photos || [],
+      observations: observations || [],
+      documents: documents || [],
       conformity_signature: conformitySignature
     });
   } catch (error) {

@@ -92,7 +92,11 @@ export default function WorkOrderDetail() {
   const fetchOrder = async () => {
     try {
       const response = await api.get(`/work-orders/${id}`);
-      setOrder(response.data);
+      const data = response.data || {};
+      setOrder({
+        ...data,
+        measurements: Array.isArray(data.measurements) ? data.measurements : []
+      });
     } catch (error) {
       console.error('Error fetching work order:', error);
     } finally {
@@ -341,8 +345,15 @@ export default function WorkOrderDetail() {
     return <div className="error">Orden no encontrada</div>;
   }
 
-  const initialMeasurements = order.measurements?.filter(m => (m.measurement_type || m.measurementType) === 'initial') || [];
-  const finalMeasurements = order.measurements?.filter(m => (m.measurement_type || m.measurementType) === 'final') || [];
+  const measurementsList = Array.isArray(order.measurements) ? order.measurements : [];
+  const initialMeasurements = measurementsList.filter(m => {
+    const t = String(m?.measurement_type ?? m?.measurementType ?? '').toLowerCase();
+    return t === 'initial';
+  });
+  const finalMeasurements = measurementsList.filter(m => {
+    const t = String(m?.measurement_type ?? m?.measurementType ?? '').toLowerCase();
+    return t === 'final';
+  });
 
   // Calcular días trabajados
   const calculateWorkingDays = () => {
@@ -717,13 +728,16 @@ export default function WorkOrderDetail() {
             <h2>Mediciones Iniciales</h2>
             {initialMeasurements.length > 0 ? (
               <div className="measurements-list">
-                {initialMeasurements.map(measurement => (
+                {initialMeasurements.map(measurement => {
+                  const housings = measurement.housing_measurements ?? measurement.housingMeasurements ?? [];
+                  const hasHousings = Array.isArray(housings) && housings.length > 0;
+                  return (
                   <div key={measurement.id} className="measurement-card">
                     <div className="measurement-header">
                       <span>{new Date(measurement.measurement_date).toLocaleString('es-PA')}</span>
                     </div>
 
-                    {measurement.housing_measurements && measurement.housing_measurements.length > 0 ? (
+                    {hasHousings ? (
                       <div style={{ overflowX: 'auto' }}>
                         <table className="data-table">
                           <thead>
@@ -738,7 +752,7 @@ export default function WorkOrderDetail() {
                             </tr>
                           </thead>
                           <tbody>
-                            {measurement.housing_measurements.map((hm) => (
+                            {housings.map((hm) => (
                               <tr key={hm.housing_id}>
                                 <td>{hm.measure_code}</td>
                                 <td>{hm.housing_description || '-'}</td>
@@ -768,7 +782,8 @@ export default function WorkOrderDetail() {
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="empty-message">No hay mediciones iniciales</p>
@@ -777,13 +792,16 @@ export default function WorkOrderDetail() {
             <h2>Mediciones Finales</h2>
             {finalMeasurements.length > 0 ? (
               <div className="measurements-list">
-                {finalMeasurements.map(measurement => (
+                {finalMeasurements.map(measurement => {
+                  const housings = measurement.housing_measurements ?? measurement.housingMeasurements ?? [];
+                  const hasHousings = Array.isArray(housings) && housings.length > 0;
+                  return (
                   <div key={measurement.id} className="measurement-card">
                     <div className="measurement-header">
                       <span>{new Date(measurement.measurement_date).toLocaleString('es-PA')}</span>
                     </div>
 
-                    {measurement.housing_measurements && measurement.housing_measurements.length > 0 ? (
+                    {hasHousings ? (
                       <div style={{ overflowX: 'auto' }}>
                         <table className="data-table">
                           <thead>
@@ -798,7 +816,7 @@ export default function WorkOrderDetail() {
                             </tr>
                           </thead>
                           <tbody>
-                            {measurement.housing_measurements.map((hm) => (
+                            {housings.map((hm) => (
                               <tr key={hm.housing_id}>
                                 <td>{hm.measure_code}</td>
                                 <td>{hm.housing_description || '-'}</td>
@@ -828,7 +846,8 @@ export default function WorkOrderDetail() {
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="empty-message">No hay mediciones finales</p>
