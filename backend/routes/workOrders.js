@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { getConnection } from '../config/database.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { activityLogger, logActivity } from '../middleware/logger.js';
+import { generateWorkOrderReport } from '../lib/pdfReport.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,6 +70,161 @@ router.get('/', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get work orders error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get work order report PDF (must be before GET /:id)
+router.get('/:id/report', authenticateToken, async (req, res) => {
+  try {
+    const pool = await getConnection();
+    const workOrderId = parseInt(req.params.id, 10);
+    if (Number.isNaN(workOrderId)) {
+      return res.status(400).json({ error: 'Invalid work order id' });
+    }
+
+    const [orders] = await pool.query(`
+      SELECT wo.*, c.name as client_name, c.company_name, c.email as client_email, c.phone as client_phone,
+        e.serial_number, e.description as equipment_description,
+        CONCAT(eb.name, ' ', em.model_name, ' - ', e.serial_number) as equipment_name,
+        em.model_name, em.components as equipment_components, eb.name as brand_name, eb.id as brand_id, em.id as model_id,
+        u.full_name as technician_name, u.phone as technician_phone, creator.full_name as created_by_name
+      FROM work_orders wo
+      LEFT JOIN clients c ON wo.client_id = c.id
+      LEFT JOIN equipment e ON wo.equipment_id = e.id
+      LEFT JOIN equipment_models em ON e.model_id = em.id
+      LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
+      LEFT JOIN users u ON wo.assigned_technician_id = u.id
+      LEFT JOIN users creator ON wo.created_by = creator.id
+      WHERE wo.id = ?
+    `, [workOrderId]);
+
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+    const order = orders[0];
+
+    if (req.user.role === 'technician' && order.assigned_technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const [wosRows] = await pool.query(`
+      SELECT wos.id, wos.service_id, wos.housing_count, s.name as service_name, s.code as service_code, s.description as service_description
+      FROM work_order_services wos
+      LEFT JOIN services s ON wos.service_id = s.id
+      WHERE wos.work_order_id = ? ORDER BY wos.id
+    `, [workOrderId]);
+    let orderServices = wosRows || [];
+    if (orderServices.length === 0 && order.service_id) {
+      const [legacy] = await pool.query(
+        'SELECT id, name as service_name, code as service_code, description as service_description FROM services WHERE id = ?',
+        [order.service_id]
+      );
+      if (legacy.length > 0) {
+        orderServices = [{ service_id: order.service_id, housing_count: order.service_housing_count || 0, ...legacy[0] }];
+      }
+    }
+
+    const [measurementsRows] = await pool.query(
+      'SELECT id, work_order_id, measurement_type, measurement_date, temperature, pressure, voltage, current, resistance, other_measurements, notes, taken_by, created_at FROM measurements WHERE work_order_id = ? ORDER BY measurement_date',
+      [workOrderId]
+    );
+    const measurements = measurementsRows || [];
+
+    const [serviceHousingsRows] = await pool.query(
+      'SELECT * FROM work_order_housings WHERE work_order_id = ? ORDER BY work_order_service_id, id',
+      [workOrderId]
+    );
+    const serviceHousings = serviceHousingsRows || [];
+    orderServices.forEach((svc, idx) => {
+      if (svc.id) {
+        svc.housings = serviceHousings.filter((h) => h.work_order_service_id === svc.id);
+      } else if (idx === 0) {
+        svc.housings = serviceHousings.filter((h) => h.work_order_service_id == null);
+      } else {
+        svc.housings = [];
+      }
+    });
+
+    let housingMeasurementsByMeasurementId = new Map();
+    try {
+      const [hmRows] = await pool.query(`
+        SELECT wohm.*, woh.measure_code, woh.description as housing_description, woh.nominal_value, woh.nominal_unit, woh.tolerance
+        FROM work_order_housing_measurements wohm
+        JOIN work_order_housings woh ON wohm.housing_id = woh.id
+        JOIN measurements m ON wohm.measurement_id = m.id
+        WHERE m.work_order_id = ? ORDER BY woh.id
+      `, [workOrderId]);
+      (hmRows || []).forEach((r) => {
+        const key = r.measurement_id;
+        if (!housingMeasurementsByMeasurementId.has(key)) housingMeasurementsByMeasurementId.set(key, []);
+        housingMeasurementsByMeasurementId.get(key).push(r);
+      });
+    } catch (_) {}
+
+    const measurementsWithHousing = measurements.map((m) => {
+      const rawType = String(m.measurement_type ?? m.measurementType ?? '').toLowerCase();
+      return {
+        ...m,
+        measurement_type: rawType,
+        housing_measurements: housingMeasurementsByMeasurementId.get(m.id) || []
+      };
+    });
+
+    const [photos] = await pool.query('SELECT * FROM work_order_photos WHERE work_order_id = ? ORDER BY created_at', [workOrderId]);
+    let documents = [];
+    try {
+      const [docResults] = await pool.query(`
+        SELECT wod.*, ed.brand_id as equipment_brand_id, ed.model_id as equipment_model_id, ed.housing_id as equipment_housing_id,
+          CASE WHEN wodp.id IS NOT NULL THEN wodp.is_visible_to_technician ELSE TRUE END as is_visible_to_technician
+        FROM work_order_documents wod
+        LEFT JOIN equipment_documents ed ON wod.equipment_document_id = ed.id
+        LEFT JOIN work_order_document_permissions wodp ON wod.id = wodp.document_id AND wodp.work_order_id = ?
+        WHERE wod.work_order_id = ? OR wod.equipment_id = ?
+        ORDER BY wod.created_at
+      `, [workOrderId, workOrderId, order.equipment_id]);
+      documents = docResults || [];
+    } catch (_) {}
+
+    if (order.equipment_id) {
+      const [equipDetails] = await pool.query(
+        'SELECT e.housing_id, em.brand_id, em.id as model_id FROM equipment e JOIN equipment_models em ON e.model_id = em.id WHERE e.id = ?',
+        [order.equipment_id]
+      );
+      if (equipDetails.length > 0) {
+        const eq = equipDetails[0];
+        const [equipDocs] = await pool.query(`
+          SELECT ed.*, CASE WHEN wodp.id IS NOT NULL THEN wodp.is_visible_to_technician ELSE TRUE END as is_visible_to_technician
+          FROM equipment_documents ed
+          LEFT JOIN work_order_documents wod ON wod.equipment_document_id = ed.id AND wod.work_order_id = ?
+          LEFT JOIN work_order_document_permissions wodp ON wod.id = wodp.document_id AND wodp.work_order_id = ?
+          WHERE (ed.brand_id = ? OR ed.model_id = ? OR ed.housing_id = ?) AND wod.id IS NULL
+        `, [workOrderId, workOrderId, eq.brand_id, eq.model_id, eq.housing_id || -1]);
+        const existingDocIds = new Set(documents.map(d => d.equipment_document_id).filter(Boolean));
+        (equipDocs || []).forEach(ed => {
+          if (!existingDocIds.has(ed.id)) {
+            documents.push({ ...ed, id: `equip_${ed.id}`, is_equipment_document: true });
+          }
+        });
+      }
+    }
+
+    const payload = {
+      ...order,
+      services: orderServices,
+      service_housings: serviceHousings,
+      measurements: measurementsWithHousing,
+      photos: photos || [],
+      documents: documents || []
+    };
+
+    const pdfBuffer = await generateWorkOrderReport(payload);
+    const filename = `OT-${(order.order_number || order.id).toString().replace(/\s/g, '-')}-reporte.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Work order report error:', error);
+    res.status(500).json({ error: 'Error al generar el reporte PDF' });
   }
 });
 

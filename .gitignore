@@ -37,3 +37,6 @@ backend/uploads/documents/*
 # API response dumps (debug)
 get-work-order.json
 *-response.json
+
+# Reference PDF (formato de reporte)
+reporte.pdf

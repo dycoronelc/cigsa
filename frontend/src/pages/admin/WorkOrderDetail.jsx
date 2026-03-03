@@ -377,6 +377,22 @@ export default function WorkOrderDetail() {
 
   const workingDays = calculateWorkingDays();
 
+  const handleDownloadReport = async () => {
+    try {
+      const response = await api.get(`/work-orders/${id}/report`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `OT-${order.order_number || id}-reporte.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      showError(e.response?.data?.error || 'Error al descargar el reporte PDF');
+    }
+  };
+
   return (
     <div className="work-order-detail">
       <div className="detail-header">
@@ -388,6 +404,9 @@ export default function WorkOrderDetail() {
           <p>{order.title}</p>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button type="button" className="btn-secondary" onClick={handleDownloadReport} title="Descargar reporte en PDF">
+            📄 Reporte PDF
+          </button>
           {!editMode ? (
             <button type="button" className="btn-primary" onClick={startEdit}>
               Editar
