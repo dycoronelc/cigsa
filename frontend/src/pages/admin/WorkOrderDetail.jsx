@@ -771,14 +771,19 @@ export default function WorkOrderDetail() {
                       </div>
                     ) : (
                       <div className="measurement-values">
-                        {measurement.temperature && <div>Temperatura: {measurement.temperature}°C</div>}
-                        {measurement.pressure && <div>Presión: {measurement.pressure}</div>}
-                        {measurement.voltage && <div>Voltaje: {measurement.voltage}V</div>}
-                        {measurement.current && <div>Corriente: {measurement.current}A</div>}
-                        {measurement.resistance && <div>Resistencia: {measurement.resistance}Ω</div>}
-                        <div style={{ marginTop: 8 }}>
-                          <strong>Observaciones:</strong> {measurement.notes || '-'}
-                        </div>
+                        {measurement.temperature != null && measurement.temperature !== '' && <div>Temperatura: {measurement.temperature}°C</div>}
+                        {measurement.pressure != null && measurement.pressure !== '' && <div>Presión: {measurement.pressure}</div>}
+                        {measurement.voltage != null && measurement.voltage !== '' && <div>Voltaje: {measurement.voltage}V</div>}
+                        {measurement.current != null && measurement.current !== '' && <div>Corriente: {measurement.current}A</div>}
+                        {measurement.resistance != null && measurement.resistance !== '' && <div>Resistencia: {measurement.resistance}Ω</div>}
+                        {(measurement.notes != null && measurement.notes !== '') && (
+                          <div style={{ marginTop: 8 }}><strong>Observaciones:</strong> {measurement.notes}</div>
+                        )}
+                        {!hasHousings && (
+                          <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
+                            No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -835,14 +840,19 @@ export default function WorkOrderDetail() {
                       </div>
                     ) : (
                       <div className="measurement-values">
-                        {measurement.temperature && <div>Temperatura: {measurement.temperature}°C</div>}
-                        {measurement.pressure && <div>Presión: {measurement.pressure}</div>}
-                        {measurement.voltage && <div>Voltaje: {measurement.voltage}V</div>}
-                        {measurement.current && <div>Corriente: {measurement.current}A</div>}
-                        {measurement.resistance && <div>Resistencia: {measurement.resistance}Ω</div>}
-                        <div style={{ marginTop: 8 }}>
-                          <strong>Observaciones:</strong> {measurement.notes || '-'}
-                        </div>
+                        {measurement.temperature != null && measurement.temperature !== '' && <div>Temperatura: {measurement.temperature}°C</div>}
+                        {measurement.pressure != null && measurement.pressure !== '' && <div>Presión: {measurement.pressure}</div>}
+                        {measurement.voltage != null && measurement.voltage !== '' && <div>Voltaje: {measurement.voltage}V</div>}
+                        {measurement.current != null && measurement.current !== '' && <div>Corriente: {measurement.current}A</div>}
+                        {measurement.resistance != null && measurement.resistance !== '' && <div>Resistencia: {measurement.resistance}Ω</div>}
+                        {(measurement.notes != null && measurement.notes !== '') && (
+                          <div style={{ marginTop: 8 }}><strong>Observaciones:</strong> {measurement.notes}</div>
+                        )}
+                        {!hasHousings && (
+                          <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
+                            No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>

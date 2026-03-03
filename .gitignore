@@ -33,3 +33,7 @@ backend/uploads/documents/*
 # Database
 *.sql.backup
 *.db
+
+# API response dumps (debug)
+get-work-order.json
+*-response.json
