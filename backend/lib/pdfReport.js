@@ -29,10 +29,10 @@ function getLogoPath() {
   return path.join(__dirname, '..', 'assets', 'logo.png');
 }
 
-/** Ruta absoluta del archivo de un documento (file_path es tipo /uploads/documents/nombre.ext). */
+/** Ruta absoluta del archivo de un documento. Usa file_path (ej. /uploads/documents/nombre.ext) o file_name. */
 function getDocumentFilePath(docItem) {
-  const fp = docItem.file_path || '';
-  const name = path.basename(fp) || docItem.file_name;
+  const fp = (docItem.file_path || '').trim();
+  const name = (path.basename(fp) || docItem.file_name || '').trim();
   if (!name) return null;
   return path.join(__dirname, '..', 'uploads', 'documents', name);
 }
@@ -115,19 +115,22 @@ function getReportDate(order) {
 
 /** Dibuja el pie de página con datos de contacto (en la página actual, al final). */
 function drawFooter(doc) {
-  const y = PAGE_HEIGHT - FOOTER_HEIGHT;
+  const y = PAGE_HEIGHT - MARGIN - 24;
   doc.strokeColor('#ccc').lineWidth(0.5).moveTo(MARGIN, y - 6).lineTo(PAGE_WIDTH - MARGIN, y - 6).stroke();
   doc.font('Helvetica').fontSize(8).fillColor('#555');
   doc.text(FOOTER_TEXT, MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
   doc.strokeColor('black').lineWidth(1);
 }
 
+/** Zona inferior reservada para el pie (evitar contenido aquí). */
+const FOOTER_ZONE_TOP = PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT;
+
 /**
- * Si no hay espacio suficiente, dibuja el pie, añade página y encabezado. Devuelve la y para seguir.
+ * Si no hay espacio suficiente, añade página y encabezado. En pageAdded se dibuja el pie en la página anterior.
+ * Devuelve la y para seguir.
  */
 function ensureSpace(doc, reportDate, currentY, neededHeight) {
-  if (currentY + neededHeight <= CONTENT_BOTTOM) return currentY;
-  drawFooter(doc);
+  if (currentY + neededHeight <= FOOTER_ZONE_TOP) return currentY;
   doc.addPage();
   drawHeader(doc, reportDate);
   return CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
@@ -140,6 +143,16 @@ export async function generateWorkOrderReport(orderData) {
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
+
+    doc.on('pageAdded', () => {
+      const range = doc.bufferedPageRange();
+      if (range && range.count > 1) {
+        const prevPageIndex = range.count - 2;
+        doc.switchToPage(prevPageIndex);
+        drawFooter(doc);
+        doc.switchToPage(prevPageIndex + 1);
+      }
+    });
 
     const order = orderData;
     const services = order.services || [];
@@ -234,7 +247,7 @@ export async function generateWorkOrderReport(orderData) {
 
     const blueprints = documents.filter((d) => d.document_type === 'blueprint' || (d.file_name && /\.(pdf|png|jpg|jpeg|gif|webp)$/i.test(d.file_name)));
     if (blueprints.length > 0) {
-      const imagePlanos = blueprints.filter((d) => d.file_name && IMAGE_EXT.test(d.file_name) && /^Planos/i.test(d.file_name));
+      const imagePlanos = blueprints.filter((d) => d.file_name && IMAGE_EXT.test(d.file_name));
       if (imagePlanos.length > 0) {
         y = ensureSpace(doc, reportDate, y, 20);
         doc.font('Helvetica-Bold').text('Planos / Documentos', MARGIN, y);
@@ -266,13 +279,14 @@ export async function generateWorkOrderReport(orderData) {
     }
 
     if (order.description) {
+      const descHeight = 50;
+      y = ensureSpace(doc, reportDate, y, descHeight);
       doc.font('Helvetica-Bold').text('Observaciones', MARGIN, y);
       y += 12;
       doc.font('Helvetica').text(order.description, MARGIN, y, { width: CONTENT_WIDTH });
       y += 30;
     }
 
-    drawFooter(doc);
     doc.addPage();
     y = CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
 
