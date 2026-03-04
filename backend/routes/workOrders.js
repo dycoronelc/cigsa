@@ -154,7 +154,7 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
         WHERE m.work_order_id = ? ORDER BY woh.id
       `, [workOrderId]);
       (hmRows || []).forEach((r) => {
-        const key = r.measurement_id;
+        const key = Number(r.measurement_id);
         if (!housingMeasurementsByMeasurementId.has(key)) housingMeasurementsByMeasurementId.set(key, []);
         housingMeasurementsByMeasurementId.get(key).push(r);
       });
@@ -165,7 +165,7 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       return {
         ...m,
         measurement_type: rawType,
-        housing_measurements: housingMeasurementsByMeasurementId.get(m.id) || []
+        housing_measurements: housingMeasurementsByMeasurementId.get(Number(m.id)) || []
       };
     });
 
@@ -355,7 +355,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
       `, [workOrderId]);
 
       (rows || []).forEach((r) => {
-        const key = r.measurement_id;
+        const key = Number(r.measurement_id);
         if (!housingMeasurementsByMeasurementId.has(key)) {
           housingMeasurementsByMeasurementId.set(key, []);
         }
@@ -383,7 +383,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
         notes: m.notes,
         taken_by: m.taken_by,
         created_at: m.created_at,
-        housing_measurements: housingMeasurementsByMeasurementId.get(m.id) || []
+        housing_measurements: housingMeasurementsByMeasurementId.get(Number(m.id)) || []
       };
     });
     

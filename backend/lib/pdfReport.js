@@ -29,6 +29,18 @@ function getLogoPath() {
   return path.join(__dirname, '..', 'assets', 'logo.png');
 }
 
+/** Ruta absoluta del archivo de un documento (file_path es tipo /uploads/documents/nombre.ext). */
+function getDocumentFilePath(docItem) {
+  const fp = docItem.file_path || '';
+  const name = path.basename(fp) || docItem.file_name;
+  if (!name) return null;
+  return path.join(__dirname, '..', 'uploads', 'documents', name);
+}
+
+const IMAGE_EXT = /\.(png|jpg|jpeg|gif|webp)$/i;
+const MAX_PLANO_IMAGE_HEIGHT = 200;
+const PLANO_ITEM_HEIGHT = MAX_PLANO_IMAGE_HEIGHT + 18;
+
 /** Dibuja el encabezado (logo, nombre, RUC, cajas día/mes/año) con borde. */
 function drawHeader(doc, reportDate) {
   const y = MARGIN;
@@ -107,6 +119,7 @@ function drawFooter(doc) {
   doc.strokeColor('#ccc').lineWidth(0.5).moveTo(MARGIN, y - 6).lineTo(PAGE_WIDTH - MARGIN, y - 6).stroke();
   doc.font('Helvetica').fontSize(8).fillColor('#555');
   doc.text(FOOTER_TEXT, MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
+  doc.strokeColor('black').lineWidth(1);
 }
 
 /**
@@ -219,19 +232,37 @@ export async function generateWorkOrderReport(orderData) {
     doc.font('Helvetica').text(photos.length > 0 ? `${photos.length} foto(s) registrada(s) en el sistema.` : 'Sin fotos registradas.', MARGIN, y);
     y += 20;
 
-    const blueprints = documents.filter((d) => d.document_type === 'blueprint' || (d.file_name && /\.(pdf|png|jpg|jpeg)$/i.test(d.file_name)));
+    const blueprints = documents.filter((d) => d.document_type === 'blueprint' || (d.file_name && /\.(pdf|png|jpg|jpeg|gif|webp)$/i.test(d.file_name)));
     if (blueprints.length > 0) {
-      const planosHeight = 20 + Math.min(blueprints.length, 5) * 14 + 20;
-      y = ensureSpace(doc, reportDate, y, planosHeight);
-      doc.font('Helvetica-Bold').text('Planos / Documentos', MARGIN, y);
-      y += 12;
-      doc.font('Helvetica');
-      blueprints.slice(0, 5).forEach((d) => {
-        doc.text(`• ${d.file_name || 'Documento'}`, MARGIN + 10, y);
-        y += 14;
-      });
-      if (blueprints.length > 5) doc.text(`... y ${blueprints.length - 5} más`, MARGIN + 10, y);
-      y += 16;
+      const imagePlanos = blueprints.filter((d) => d.file_name && IMAGE_EXT.test(d.file_name) && /^Planos/i.test(d.file_name));
+      if (imagePlanos.length > 0) {
+        y = ensureSpace(doc, reportDate, y, 20);
+        doc.font('Helvetica-Bold').text('Planos / Documentos', MARGIN, y);
+        y += 16;
+        doc.font('Helvetica').fontSize(9);
+
+        imagePlanos.forEach((d) => {
+          y = ensureSpace(doc, reportDate, y, PLANO_ITEM_HEIGHT);
+          const absPath = getDocumentFilePath(d);
+          const name = d.file_name || 'Documento';
+          if (absPath && fs.existsSync(absPath)) {
+            try {
+              doc.image(absPath, MARGIN, y, { fit: [CONTENT_WIDTH, MAX_PLANO_IMAGE_HEIGHT], align: 'center', valign: 'top' });
+              y += MAX_PLANO_IMAGE_HEIGHT + 4;
+              doc.fillColor('#333').text(name, MARGIN, y, { width: CONTENT_WIDTH });
+              y += 14;
+            } catch (_) {
+              doc.text(`• ${name}`, MARGIN + 10, y);
+              y += 14;
+            }
+          } else {
+            doc.text(`• ${name}`, MARGIN + 10, y);
+            y += 14;
+          }
+        });
+        doc.fillColor('black');
+        y += 16;
+      }
     }
 
     if (order.description) {
@@ -243,18 +274,21 @@ export async function generateWorkOrderReport(orderData) {
 
     drawFooter(doc);
     doc.addPage();
-    y = CONTENT_TOP;
+    y = CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
 
     // ----- PÁGINA 2: METROLOGÍA -----
     drawHeader(doc, reportDate);
 
     doc.fontSize(12).font('Helvetica-Bold').fillColor('black').text('METROLOGÍA DE ALOJAMIENTOS', MARGIN, y);
-    y += 10;
+    y += 18;
     doc.fontSize(10).font('Helvetica').text(`Equipo: ${order.serial_number || '-'}  |  N° Orden Cliente: ${order.client_service_order_number || '-'}`, MARGIN, y);
     y += 20;
 
     const housings = serviceHousings.length ? serviceHousings : [];
     const byId = (id) => housings.find((h) => h.id === id) || {};
+
+    const nominalTableHeight = housings.length === 0 ? 40 : 30 + housings.length * 16;
+    y = ensureSpace(doc, reportDate, y, nominalTableHeight);
 
     doc.font('Helvetica-Bold').fontSize(10).text('MEDIDAS NOMINALES', MARGIN, y);
     y += 14;
@@ -286,6 +320,9 @@ export async function generateWorkOrderReport(orderData) {
       y += 16;
     }
 
+    const initialSectionHeight = initialMeasurements.length === 0 ? 35 : 20 + initialMeasurements.length * 45;
+    y = ensureSpace(doc, reportDate, y, initialSectionHeight);
+
     doc.font('Helvetica-Bold').fontSize(10).text('MEDIDAS INICIALES', MARGIN, y);
     y += 14;
     if (initialMeasurements.length === 0) {
@@ -311,6 +348,9 @@ export async function generateWorkOrderReport(orderData) {
       });
       y += 8;
     }
+
+    const finalSectionHeight = finalMeasurements.length === 0 ? 35 : 20 + finalMeasurements.length * 45;
+    y = ensureSpace(doc, reportDate, y, finalSectionHeight);
 
     doc.font('Helvetica-Bold').fontSize(10).text('MEDIDAS FINALES', MARGIN, y);
     y += 14;
