@@ -1,35 +1,41 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Script de despliegue CIGSA - ejecutar desde el servidor en /var/www/cigsa
+# Uso: ./deploy.sh
+# La primera vez: chmod +x deploy.sh
 
-# Deploy script for CIGSA (Linux server)
-# Usage:
-#   ./deploy.sh
-#
-# Notes:
-# - Assumes repo is at /var/www/cigsa
-# - Assumes PM2 process name: cigsa-backend
+set -e
 
 REPO_DIR="${REPO_DIR:-/var/www/cigsa}"
 BRANCH="${BRANCH:-main}"
 PM2_NAME="${PM2_NAME:-cigsa-backend}"
 
-echo "==> Deploying CIGSA in ${REPO_DIR} (branch: ${BRANCH})"
+echo "=========================================="
+echo "  Despliegue CIGSA - $(date '+%Y-%m-%d %H:%M')"
+echo "=========================================="
 
 cd "${REPO_DIR}"
+echo "[1/6] Directorio: $(pwd)"
 
-echo "==> Updating git branch"
+echo "[2/6] Git fetch --all"
 git fetch --all
+
+echo "[3/6] Git pull origin ${BRANCH}"
 git pull origin "${BRANCH}"
 
-echo "==> Backend: install deps + restart"
+echo "[4/6] Backend: npm install + pm2 restart"
 cd backend
 npm install
 pm2 restart "${PM2_NAME}"
+cd ..
 
-echo "==> Frontend: install deps + build"
-cd ../frontend
+echo "[5/6] Frontend: npm install"
+cd frontend
 npm install
+
+echo "[6/6] Frontend: npm run build"
 npm run build
+cd ..
 
-echo "==> Done."
-
+echo "=========================================="
+echo "  Despliegue completado."
+echo "=========================================="
