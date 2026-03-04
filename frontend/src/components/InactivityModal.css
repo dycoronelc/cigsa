@@ -1,0 +1,105 @@
+.inactivity-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  animation: inactivity-fadeIn 0.2s ease-out;
+}
+
+@keyframes inactivity-fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.inactivity-modal {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  background: var(--card-bg);
+  border-radius: 12px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  padding: 2rem 1.75rem;
+  text-align: center;
+  overflow: hidden;
+  animation: inactivity-scaleIn 0.25s ease-out;
+}
+
+@keyframes inactivity-scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.inactivity-modal-accent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--primary) 0%, var(--primary-dark) 50%, var(--yellow-dark) 100%);
+}
+
+.inactivity-modal-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 1.25rem;
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.12) 0%, rgba(245, 158, 11, 0.12) 100%);
+  color: var(--primary);
+  border-radius: 50%;
+}
+
+.inactivity-modal-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 0.75rem;
+}
+
+.inactivity-modal-message {
+  font-size: 0.9375rem;
+  color: var(--text-light);
+  line-height: 1.5;
+  margin: 0 0 1.5rem;
+}
+
+.inactivity-modal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 140px;
+  padding: 0.625rem 1.5rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: white;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.inactivity-modal-btn:hover {
+  box-shadow: 0 4px 14px rgba(30, 64, 175, 0.4);
+  transform: translateY(-1px);
+}
+
+.inactivity-modal-btn:active {
+  transform: translateY(0);
+}

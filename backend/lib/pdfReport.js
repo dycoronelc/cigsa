@@ -320,12 +320,14 @@ export async function generateWorkOrderReport(orderData) {
       y += 20;
     } else {
       doc.font('Helvetica').fontSize(9);
-      const colW = 70;
+      const medColW = 70;
+      const descColW = 140;
+      const otherColW = 70;
       doc.text('Medida', MARGIN, y);
-      doc.text('Descripción', MARGIN + colW, y);
-      doc.text('Nominal', MARGIN + colW + 120, y);
-      doc.text('Tolerancia', MARGIN + colW + 120 + colW, y);
-      doc.text('Unidad', MARGIN + colW + 120 + colW * 2, y);
+      doc.text('Descripción', MARGIN + medColW, y);
+      doc.text('Nominal', MARGIN + medColW + descColW, y);
+      doc.text('Tolerancia', MARGIN + medColW + descColW + otherColW, y);
+      doc.text('Unidad', MARGIN + medColW + descColW + otherColW * 2, y);
       y += 14;
       doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
       y += 8;
@@ -334,10 +336,10 @@ export async function generateWorkOrderReport(orderData) {
         const tol = h.tolerance || '-';
         const unit = h.nominal_unit || '-';
         doc.text(h.measure_code || '-', MARGIN, y);
-        doc.text((h.description || '-').slice(0, 25), MARGIN + colW, y, { width: 120 });
-        doc.text(nom, MARGIN + colW + 120, y);
-        doc.text(tol, MARGIN + colW + 120 + colW, y);
-        doc.text(unit, MARGIN + colW + 120 + colW * 2, y);
+        doc.text((h.description || '-').slice(0, 32), MARGIN + medColW, y, { width: descColW });
+        doc.text(nom, MARGIN + medColW + descColW, y);
+        doc.text(tol, MARGIN + medColW + descColW + otherColW, y);
+        doc.text(unit, MARGIN + medColW + descColW + otherColW * 2, y);
         y += 14;
       });
       y += 16;
@@ -349,7 +351,7 @@ export async function generateWorkOrderReport(orderData) {
       initialMeasurements.forEach((m) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
         h += 12;
-        if (hmList.length > 0) h += 18 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8;
+        if (hmList.length > 0) h += 14 + 8 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8;
       });
       return h;
     })();
@@ -361,38 +363,39 @@ export async function generateWorkOrderReport(orderData) {
       doc.font('Helvetica').text('Sin mediciones iniciales registradas.', MARGIN, y);
       y += 20;
     } else {
-      const colW = { med: 32, desc: 95, nom: 48, tol: 42, x1: 42, y1: 42, un: 38 };
+      const colW = { med: 32, desc: 120, nom: 48, tol: 46, x1: 40, y1: 40, un: 36 };
+      const x = (label) => MARGIN + (label === 'med' ? 0 : label === 'desc' ? colW.med : label === 'nom' ? colW.med + colW.desc : label === 'tol' ? colW.med + colW.desc + colW.nom : label === 'x1' ? colW.med + colW.desc + colW.nom + colW.tol : label === 'y1' ? colW.med + colW.desc + colW.nom + colW.tol + colW.x1 : colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1);
       const tableWidth = colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1 + colW.un;
       initialMeasurements.forEach((m) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
-        const blockH = 12 + (hmList.length > 0 ? 18 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8 : 0);
+        const blockH = 12 + (hmList.length > 0 ? 14 + 8 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8 : 0);
         y = ensureSpace(doc, reportDate, y, blockH);
         doc.font('Helvetica').fontSize(9).fillColor('black').text(`Fecha: ${formatDateTime(m.measurement_date)}`, MARGIN, y);
         y += 12;
         if (hmList.length > 0) {
-          doc.font('Helvetica-Bold').fontSize(8);
-          doc.rect(MARGIN, y, tableWidth, 16).fillAndStroke('#eee', '#333');
-          doc.fillColor('black').text('Medida', MARGIN + 4, y + 4, { width: colW.med });
-          doc.text('Descripción', MARGIN + colW.med + 4, y + 4, { width: colW.desc });
-          doc.text('Nominal', MARGIN + colW.med + colW.desc + 4, y + 4, { width: colW.nom });
-          doc.text('Tol.', MARGIN + colW.med + colW.desc + colW.nom + 4, y + 4, { width: colW.tol });
-          doc.text('X1', MARGIN + colW.med + colW.desc + colW.nom + colW.tol + 4, y + 4, { width: colW.x1 });
-          doc.text('Y1', MARGIN + colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + 4, y + 4, { width: colW.y1 });
-          doc.text('Unidad', MARGIN + colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1 + 4, y + 4);
-          y += 18;
-          doc.font('Helvetica').fontSize(8);
+          doc.font('Helvetica').fontSize(9);
+          doc.text('Medida', x('med'), y);
+          doc.text('Descripción', x('desc'), y);
+          doc.text('Nominal', x('nom'), y);
+          doc.text('Tolerancia', x('tol'), y);
+          doc.text('X1', x('x1'), y);
+          doc.text('Y1', x('y1'), y);
+          doc.text('Unidad', x('un'), y);
+          y += 14;
+          doc.moveTo(MARGIN, y).lineTo(MARGIN + tableWidth, y).stroke();
+          y += 8;
+          doc.font('Helvetica').fontSize(9);
           hmList.forEach((hm) => {
             const h = byId(hm.housing_id);
-            const desc = (hm.housing_description || h?.description || '-').slice(0, 22);
+            const desc = (hm.housing_description || h?.description || '-').slice(0, 28);
             const nom = (hm.nominal_value != null) ? `${hm.nominal_value} ${(hm.nominal_unit || '').trim()}`.trim() || '-' : (h && (h.nominal_value != null) ? `${h.nominal_value} ${h.nominal_unit || ''}`.trim() : '-');
-            doc.rect(MARGIN, y, tableWidth, 14).stroke();
-            doc.text(hm.measure_code || h?.measure_code || '-', MARGIN + 4, y + 3, { width: colW.med });
-            doc.text(desc, MARGIN + colW.med + 4, y + 3, { width: colW.desc });
-            doc.text(nom, MARGIN + colW.med + colW.desc + 4, y + 3, { width: colW.nom });
-            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), MARGIN + colW.med + colW.desc + colW.nom + 4, y + 3, { width: colW.tol });
-            doc.text(String(hm.x1 ?? '-'), MARGIN + colW.med + colW.desc + colW.nom + colW.tol + 4, y + 3, { width: colW.x1 });
-            doc.text(String(hm.y1 ?? '-'), MARGIN + colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + 4, y + 3, { width: colW.y1 });
-            doc.text(String(hm.unit ?? '-'), MARGIN + colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1 + 4, y + 3);
+            doc.text(hm.measure_code || h?.measure_code || '-', x('med'), y);
+            doc.text(desc, x('desc'), y, { width: colW.desc });
+            doc.text(nom, x('nom'), y, { width: colW.nom });
+            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), x('tol'), y, { width: colW.tol });
+            doc.text(String(hm.x1 ?? '-'), x('x1'), y, { width: colW.x1 });
+            doc.text(String(hm.y1 ?? '-'), x('y1'), y, { width: colW.y1 });
+            doc.text(String(hm.unit ?? '-'), x('un'), y);
             y += 14;
           });
           y += 4;
@@ -411,7 +414,7 @@ export async function generateWorkOrderReport(orderData) {
       finalMeasurements.forEach((m) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
         h += 12;
-        if (hmList.length > 0) h += 18 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8;
+        if (hmList.length > 0) h += 14 + 8 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8;
       });
       return h;
     })();
@@ -423,38 +426,39 @@ export async function generateWorkOrderReport(orderData) {
       doc.font('Helvetica').text('Sin mediciones finales registradas.', MARGIN, y);
       y += 20;
     } else {
-      const colW = { med: 32, desc: 95, nom: 48, tol: 42, x1: 42, y1: 42, un: 38 };
+      const colW = { med: 32, desc: 120, nom: 48, tol: 46, x1: 40, y1: 40, un: 36 };
+      const x = (label) => MARGIN + (label === 'med' ? 0 : label === 'desc' ? colW.med : label === 'nom' ? colW.med + colW.desc : label === 'tol' ? colW.med + colW.desc + colW.nom : label === 'x1' ? colW.med + colW.desc + colW.nom + colW.tol : label === 'y1' ? colW.med + colW.desc + colW.nom + colW.tol + colW.x1 : colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1);
       const tableWidth = colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1 + colW.un;
       finalMeasurements.forEach((m) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
-        const blockH = 12 + (hmList.length > 0 ? 18 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8 : 0);
+        const blockH = 12 + (hmList.length > 0 ? 14 + 8 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8 : 0);
         y = ensureSpace(doc, reportDate, y, blockH);
         doc.font('Helvetica').fontSize(9).fillColor('black').text(`Fecha: ${formatDateTime(m.measurement_date)}`, MARGIN, y);
         y += 12;
         if (hmList.length > 0) {
-          doc.font('Helvetica-Bold').fontSize(8);
-          doc.rect(MARGIN, y, tableWidth, 16).fillAndStroke('#eee', '#333');
-          doc.fillColor('black').text('Medida', MARGIN + 4, y + 4, { width: colW.med });
-          doc.text('Descripción', MARGIN + colW.med + 4, y + 4, { width: colW.desc });
-          doc.text('Nominal', MARGIN + colW.med + colW.desc + 4, y + 4, { width: colW.nom });
-          doc.text('Tol.', MARGIN + colW.med + colW.desc + colW.nom + 4, y + 4, { width: colW.tol });
-          doc.text('X1', MARGIN + colW.med + colW.desc + colW.nom + colW.tol + 4, y + 4, { width: colW.x1 });
-          doc.text('Y1', MARGIN + colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + 4, y + 4, { width: colW.y1 });
-          doc.text('Unidad', MARGIN + colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1 + 4, y + 4);
-          y += 18;
-          doc.font('Helvetica').fontSize(8);
+          doc.font('Helvetica').fontSize(9);
+          doc.text('Medida', x('med'), y);
+          doc.text('Descripción', x('desc'), y);
+          doc.text('Nominal', x('nom'), y);
+          doc.text('Tolerancia', x('tol'), y);
+          doc.text('X1', x('x1'), y);
+          doc.text('Y1', x('y1'), y);
+          doc.text('Unidad', x('un'), y);
+          y += 14;
+          doc.moveTo(MARGIN, y).lineTo(MARGIN + tableWidth, y).stroke();
+          y += 8;
+          doc.font('Helvetica').fontSize(9);
           hmList.forEach((hm) => {
             const h = byId(hm.housing_id);
-            const desc = (hm.housing_description || h?.description || '-').slice(0, 22);
+            const desc = (hm.housing_description || h?.description || '-').slice(0, 28);
             const nom = (hm.nominal_value != null) ? `${hm.nominal_value} ${(hm.nominal_unit || '').trim()}`.trim() || '-' : (h && (h.nominal_value != null) ? `${h.nominal_value} ${h.nominal_unit || ''}`.trim() : '-');
-            doc.rect(MARGIN, y, tableWidth, 14).stroke();
-            doc.text(hm.measure_code || h?.measure_code || '-', MARGIN + 4, y + 3, { width: colW.med });
-            doc.text(desc, MARGIN + colW.med + 4, y + 3, { width: colW.desc });
-            doc.text(nom, MARGIN + colW.med + colW.desc + 4, y + 3, { width: colW.nom });
-            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), MARGIN + colW.med + colW.desc + colW.nom + 4, y + 3, { width: colW.tol });
-            doc.text(String(hm.x1 ?? '-'), MARGIN + colW.med + colW.desc + colW.nom + colW.tol + 4, y + 3, { width: colW.x1 });
-            doc.text(String(hm.y1 ?? '-'), MARGIN + colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + 4, y + 3, { width: colW.y1 });
-            doc.text(String(hm.unit ?? '-'), MARGIN + colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1 + 4, y + 3);
+            doc.text(hm.measure_code || h?.measure_code || '-', x('med'), y);
+            doc.text(desc, x('desc'), y, { width: colW.desc });
+            doc.text(nom, x('nom'), y, { width: colW.nom });
+            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), x('tol'), y, { width: colW.tol });
+            doc.text(String(hm.x1 ?? '-'), x('x1'), y, { width: colW.x1 });
+            doc.text(String(hm.y1 ?? '-'), x('y1'), y, { width: colW.y1 });
+            doc.text(String(hm.unit ?? '-'), x('un'), y);
             y += 14;
           });
           y += 4;

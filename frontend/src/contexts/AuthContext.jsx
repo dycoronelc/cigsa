@@ -1,14 +1,17 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import api from '../services/api';
+import InactivityModal from '../components/InactivityModal';
 
 const AuthContext = createContext(null);
 
 const INACTIVITY_MINUTES = 20;
 const INACTIVITY_MS = INACTIVITY_MINUTES * 60 * 1000;
+const INACTIVITY_MESSAGE = `Por inactividad de más de ${INACTIVITY_MINUTES} minutos, su sesión ha expirado. Debe iniciar sesión nuevamente.`;
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sessionExpiredByInactivity, setSessionExpiredByInactivity] = useState(false);
   const inactivityTimerRef = useRef(null);
 
   useEffect(() => {
@@ -28,9 +31,13 @@ export function AuthProvider({ children }) {
     if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     inactivityTimerRef.current = setTimeout(() => {
       inactivityTimerRef.current = null;
-      window.alert('Por inactividad de más de ' + INACTIVITY_MINUTES + ' minutos, su sesión ha expirado. Debe iniciar sesión nuevamente.');
-      logout();
+      setSessionExpiredByInactivity(true);
     }, INACTIVITY_MS);
+  };
+
+  const handleInactivityModalClose = () => {
+    setSessionExpiredByInactivity(false);
+    logout();
   };
 
   useEffect(() => {
@@ -87,6 +94,11 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{ user, loading, login, logout }}>
       {children}
+      <InactivityModal
+        open={sessionExpiredByInactivity}
+        message={INACTIVITY_MESSAGE}
+        onClose={handleInactivityModalClose}
+      />
     </AuthContext.Provider>
   );
 }
