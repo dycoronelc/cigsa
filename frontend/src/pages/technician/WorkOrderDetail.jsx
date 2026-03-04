@@ -98,8 +98,16 @@ export default function TechnicianWorkOrderDetail() {
   const fetchOrder = async () => {
     try {
       const response = await api.get(`/work-orders/${id}`);
-      setOrder(response.data);
-      const housings = response.data?.service_housings || [];
+      const data = response.data || {};
+      const measurements = Array.isArray(data.measurements) ? data.measurements : [];
+      setOrder({
+        ...data,
+        measurements: measurements.map((m) => ({
+          ...m,
+          housing_measurements: Array.isArray(m.housing_measurements) ? m.housing_measurements : (Array.isArray(m.housingMeasurements) ? m.housingMeasurements : [])
+        }))
+      });
+      const housings = data?.service_housings || [];
       setMeasurementData((prev) => ({
         ...prev,
         housingMeasurements: housings.map((h) => ({
@@ -506,9 +514,12 @@ export default function TechnicianWorkOrderDetail() {
 
             <h3>Mediciones Iniciales</h3>
             {initialMeasurements.length > 0 ? (
-              initialMeasurements.map(m => (
+              initialMeasurements.map(m => {
+                const housings = m.housing_measurements ?? m.housingMeasurements ?? [];
+                const hasHousings = Array.isArray(housings) && housings.length > 0;
+                return (
                 <div key={m.id} className="measurement-card">
-                  {m.housing_measurements && m.housing_measurements.length > 0 ? (
+                  {hasHousings ? (
                     <>
                       <div style={{ fontWeight: 600, marginBottom: 8 }}>
                         {new Date(m.measurement_date).toLocaleString('es-PA')}
@@ -527,7 +538,7 @@ export default function TechnicianWorkOrderDetail() {
                               </tr>
                             </thead>
                             <tbody>
-                              {m.housing_measurements.map((hm) => (
+                              {housings.map((hm) => (
                                 <tr key={hm.housing_id}>
                                   <td>{hm.measure_code}</td>
                                   <td>{hm.housing_description || '-'}</td>
@@ -556,19 +567,26 @@ export default function TechnicianWorkOrderDetail() {
                       <div style={{ marginTop: 8 }}>
                         <strong>Observaciones:</strong> {m.notes || '-'}
                       </div>
+                      <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
+                        No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
+                      </p>
                     </div>
                   )}
                 </div>
-              ))
+                );
+              })
             ) : (
               <p className="empty-message">No hay mediciones iniciales</p>
             )}
 
             <h3>Mediciones Finales</h3>
             {finalMeasurements.length > 0 ? (
-              finalMeasurements.map(m => (
+              finalMeasurements.map(m => {
+                const housings = m.housing_measurements ?? m.housingMeasurements ?? [];
+                const hasHousings = Array.isArray(housings) && housings.length > 0;
+                return (
                 <div key={m.id} className="measurement-card">
-                  {m.housing_measurements && m.housing_measurements.length > 0 ? (
+                  {hasHousings ? (
                     <>
                       <div style={{ fontWeight: 600, marginBottom: 8 }}>
                         {new Date(m.measurement_date).toLocaleString('es-PA')}
@@ -587,7 +605,7 @@ export default function TechnicianWorkOrderDetail() {
                               </tr>
                             </thead>
                             <tbody>
-                              {m.housing_measurements.map((hm) => (
+                              {housings.map((hm) => (
                                 <tr key={hm.housing_id}>
                                   <td>{hm.measure_code}</td>
                                   <td>{hm.housing_description || '-'}</td>
@@ -607,7 +625,6 @@ export default function TechnicianWorkOrderDetail() {
                     </>
                   ) : (
                     <div className="measurement-values">
-                      {/* compatibilidad con mediciones antiguas */}
                       {m.temperature && <div>T: {m.temperature}°C</div>}
                       {m.pressure && <div>P: {m.pressure}</div>}
                       {m.voltage && <div>V: {m.voltage}V</div>}
@@ -616,10 +633,14 @@ export default function TechnicianWorkOrderDetail() {
                       <div style={{ marginTop: 8 }}>
                         <strong>Observaciones:</strong> {m.notes || '-'}
                       </div>
+                      <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
+                        No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
+                      </p>
                     </div>
                   )}
                 </div>
-              ))
+                );
+              })
             ) : (
               <p className="empty-message">No hay mediciones finales</p>
             )}

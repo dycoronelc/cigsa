@@ -93,9 +93,13 @@ export default function WorkOrderDetail() {
     try {
       const response = await api.get(`/work-orders/${id}`);
       const data = response.data || {};
+      const measurements = Array.isArray(data.measurements) ? data.measurements : [];
       setOrder({
         ...data,
-        measurements: Array.isArray(data.measurements) ? data.measurements : []
+        measurements: measurements.map((m) => ({
+          ...m,
+          housing_measurements: Array.isArray(m.housing_measurements) ? m.housing_measurements : (Array.isArray(m.housingMeasurements) ? m.housingMeasurements : [])
+        }))
       });
     } catch (error) {
       console.error('Error fetching work order:', error);
