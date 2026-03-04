@@ -158,8 +158,17 @@ export async function generateWorkOrderReport(orderData) {
     const services = order.services || [];
     const serviceHousings = order.service_housings || [];
     const measurements = order.measurements || [];
-    const initialMeasurements = measurements.filter((m) => (m.measurement_type || m.measurementType || '').toLowerCase() === 'initial');
-    const finalMeasurements = measurements.filter((m) => (m.measurement_type || m.measurementType || '').toLowerCase() === 'final');
+    const measurementHasData = (m) => {
+      const housings = m.housing_measurements || m.housingMeasurements || [];
+      if (!Array.isArray(housings) || housings.length === 0) return false;
+      return housings.some((hm) => (hm.x1 != null && hm.x1 !== '') || (hm.y1 != null && hm.y1 !== '') || (hm.unit != null && hm.unit !== ''));
+    };
+    const initialMeasurements = measurements
+      .filter((m) => (m.measurement_type || m.measurementType || '').toLowerCase() === 'initial')
+      .filter(measurementHasData);
+    const finalMeasurements = measurements
+      .filter((m) => (m.measurement_type || m.measurementType || '').toLowerCase() === 'final')
+      .filter(measurementHasData);
     const photos = order.photos || [];
     const documents = order.documents || [];
     const reportDate = getReportDate(order);
@@ -348,7 +357,6 @@ export async function generateWorkOrderReport(orderData) {
         y += 12;
         const hmList = m.housing_measurements || m.housingMeasurements || [];
         if (hmList.length === 0) {
-          doc.text('(Sin datos por alojamiento)', MARGIN + 10, y);
           y += 14;
         } else {
           hmList.forEach((hm) => {
@@ -377,7 +385,6 @@ export async function generateWorkOrderReport(orderData) {
         y += 12;
         const hmList = m.housing_measurements || m.housingMeasurements || [];
         if (hmList.length === 0) {
-          doc.text('(Sin datos por alojamiento)', MARGIN + 10, y);
           y += 14;
         } else {
           hmList.forEach((hm) => {
