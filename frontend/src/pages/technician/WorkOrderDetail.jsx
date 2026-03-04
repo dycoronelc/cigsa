@@ -360,8 +360,13 @@ export default function TechnicianWorkOrderDetail() {
   if (loading) return <div className="loading">Cargando...</div>;
   if (!order) return <div className="error">Orden no encontrada</div>;
 
-  const initialMeasurements = order.measurements?.filter(m => (m.measurement_type || m.measurementType) === 'initial') || [];
-  const finalMeasurements = order.measurements?.filter(m => (m.measurement_type || m.measurementType) === 'final') || [];
+  const measurementHasData = (m) => {
+    const housings = m.housing_measurements ?? m.housingMeasurements ?? [];
+    if (!Array.isArray(housings) || housings.length === 0) return false;
+    return housings.some(hm => (hm.x1 != null && hm.x1 !== '') || (hm.y1 != null && hm.y1 !== '') || (hm.unit != null && hm.unit !== ''));
+  };
+  const initialMeasurements = (order.measurements?.filter(m => (m.measurement_type || m.measurementType) === 'initial') || []).filter(measurementHasData);
+  const finalMeasurements = (order.measurements?.filter(m => (m.measurement_type || m.measurementType) === 'final') || []).filter(measurementHasData);
   const serviceHousings = order.service_housings || [];
 
   // Calcular días trabajados

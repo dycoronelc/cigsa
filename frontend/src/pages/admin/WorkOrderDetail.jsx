@@ -35,6 +35,10 @@ export default function WorkOrderDetail() {
   const [editingServiceIdx, setEditingServiceIdx] = useState(null);
   const [activityLog, setActivityLog] = useState([]);
   const [loadingActivity, setLoadingActivity] = useState(false);
+  const [showEditMeasurementModal, setShowEditMeasurementModal] = useState(false);
+  const [editingMeasurement, setEditingMeasurement] = useState(null);
+  const [editMeasurementForm, setEditMeasurementForm] = useState({ notes: '', housingMeasurements: [] });
+  const [savingMeasurement, setSavingMeasurement] = useState(false);
 
   const isDocVisibleToTechnician = (d) => {
     const v = d?.is_visible_to_technician;
@@ -170,6 +174,39 @@ export default function WorkOrderDetail() {
     setSaving(false);
     setShowHousingsModal(false);
     setEditingServiceIdx(null);
+  };
+
+  const openEditMeasurementModal = (measurement) => {
+    const housings = measurement.housing_measurements ?? measurement.housingMeasurements ?? [];
+    setEditingMeasurement(measurement);
+    setEditMeasurementForm({
+      notes: measurement.notes ?? '',
+      housingMeasurements: housings.map(hm => ({
+        housingId: hm.housing_id,
+        measure_code: hm.measure_code,
+        housing_description: hm.housing_description,
+        x1: hm.x1 != null && hm.x1 !== '' ? String(hm.x1) : '',
+        y1: hm.y1 != null && hm.y1 !== '' ? String(hm.y1) : '',
+        unit: hm.unit ?? ''
+      }))
+    });
+    setShowEditMeasurementModal(true);
+  };
+
+  const saveEditMeasurement = async () => {
+    if (!editingMeasurement || !id) return;
+    setSavingMeasurement(true);
+    try {
+      await api.put(`/work-orders/${id}/measurements/${editingMeasurement.id}`, editMeasurementForm);
+      showSuccess('Medición actualizada');
+      setShowEditMeasurementModal(false);
+      setEditingMeasurement(null);
+      fetchOrder();
+    } catch (err) {
+      showError(err.response?.data?.error || 'Error al actualizar la medición');
+    } finally {
+      setSavingMeasurement(false);
+    }
   };
 
   const numberToLetters = (n) => {
@@ -350,14 +387,19 @@ export default function WorkOrderDetail() {
   }
 
   const measurementsList = Array.isArray(order.measurements) ? order.measurements : [];
+  const measurementHasData = (m) => {
+    const housings = m.housing_measurements ?? m.housingMeasurements ?? [];
+    if (!Array.isArray(housings) || housings.length === 0) return false;
+    return housings.some(hm => (hm.x1 != null && hm.x1 !== '') || (hm.y1 != null && hm.y1 !== '') || (hm.unit != null && hm.unit !== ''));
+  };
   const initialMeasurements = measurementsList.filter(m => {
     const t = String(m?.measurement_type ?? m?.measurementType ?? '').toLowerCase();
     return t === 'initial';
-  });
+  }).filter(measurementHasData);
   const finalMeasurements = measurementsList.filter(m => {
     const t = String(m?.measurement_type ?? m?.measurementType ?? '').toLowerCase();
     return t === 'final';
-  });
+  }).filter(measurementHasData);
 
   // Calcular días trabajados
   const calculateWorkingDays = () => {
@@ -758,6 +800,7 @@ export default function WorkOrderDetail() {
                   <div key={measurement.id} className="measurement-card">
                     <div className="measurement-header">
                       <span>{new Date(measurement.measurement_date).toLocaleString('es-PA')}</span>
+                      <button type="button" className="btn-secondary" style={{ marginLeft: 'auto', fontSize: '0.9rem' }} onClick={() => openEditMeasurementModal(measurement)}>Editar</button>
                     </div>
 
                     {hasHousings ? (
@@ -827,6 +870,7 @@ export default function WorkOrderDetail() {
                   <div key={measurement.id} className="measurement-card">
                     <div className="measurement-header">
                       <span>{new Date(measurement.measurement_date).toLocaleString('es-PA')}</span>
+                      <button type="button" className="btn-secondary" style={{ marginLeft: 'auto', fontSize: '0.9rem' }} onClick={() => openEditMeasurementModal(measurement)}>Editar</button>
                     </div>
 
                     {hasHousings ? (
@@ -1141,6 +1185,88 @@ export default function WorkOrderDetail() {
               <button type="button" onClick={() => closeHousingsModal(false)}>Cerrar</button>
               <button type="button" className="btn-primary" onClick={() => closeHousingsModal(true)}>
                 Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEditMeasurementModal && editingMeasurement && (
+        <div className="modal-overlay" onClick={() => !savingMeasurement && (setShowEditMeasurementModal(false), setEditingMeasurement(null))}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
+            <h2>Editar medición — {new Date(editingMeasurement.measurement_date).toLocaleString('es-PA')}</h2>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Observaciones</label>
+              <textarea
+                value={editMeasurementForm.notes}
+                onChange={(e) => setEditMeasurementForm({ ...editMeasurementForm, notes: e.target.value })}
+                rows={2}
+                style={{ width: '100%', padding: 8 }}
+                placeholder="Observaciones de la medición"
+              />
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Medida</th>
+                    <th>Descripción</th>
+                    <th>X1</th>
+                    <th>Y1</th>
+                    <th>Unidad</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {editMeasurementForm.housingMeasurements.map((hm, idx) => (
+                    <tr key={hm.housingId}>
+                      <td style={{ fontWeight: 700 }}>{hm.measure_code ?? '-'}</td>
+                      <td>{hm.housing_description ?? '-'}</td>
+                      <td>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={hm.x1}
+                          onChange={(e) => {
+                            const next = editMeasurementForm.housingMeasurements.map((r, i) => i === idx ? { ...r, x1: e.target.value } : r);
+                            setEditMeasurementForm({ ...editMeasurementForm, housingMeasurements: next });
+                          }}
+                          placeholder="0.000"
+                          style={{ width: 90 }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={hm.y1}
+                          onChange={(e) => {
+                            const next = editMeasurementForm.housingMeasurements.map((r, i) => i === idx ? { ...r, y1: e.target.value } : r);
+                            setEditMeasurementForm({ ...editMeasurementForm, housingMeasurements: next });
+                          }}
+                          placeholder="0.000"
+                          style={{ width: 90 }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={hm.unit}
+                          onChange={(e) => {
+                            const next = editMeasurementForm.housingMeasurements.map((r, i) => i === idx ? { ...r, unit: e.target.value } : r);
+                            setEditMeasurementForm({ ...editMeasurementForm, housingMeasurements: next });
+                          }}
+                          placeholder="In, mm..."
+                          style={{ width: 70 }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button type="button" onClick={() => { setShowEditMeasurementModal(false); setEditingMeasurement(null); }} disabled={savingMeasurement}>Cerrar</button>
+              <button type="button" className="btn-primary" onClick={saveEditMeasurement} disabled={savingMeasurement}>
+                {savingMeasurement ? 'Guardando...' : 'Guardar'}
               </button>
             </div>
           </div>

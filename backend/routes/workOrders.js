@@ -690,7 +690,13 @@ router.put('/:id', authenticateToken, async (req, res) => {
       updateValues.push(priority);
     }
     // Update work_order_services y housings (múltiples servicios por OT)
+    // No reemplazar servicios/alojamientos si ya hay mediciones tomadas (evitar perder work_order_housing_measurements)
     if (services !== undefined && Array.isArray(services)) {
+      const [measCount] = await pool.query('SELECT COUNT(*) AS c FROM measurements WHERE work_order_id = ?', [req.params.id]);
+      if ((measCount[0]?.c || 0) > 0) {
+        // Hay mediciones: no borrar ni reinsertar servicios/housings para no perder datos de mediciones
+        // Se pueden seguir actualizando el resto de campos de la OT (titulo, descripción, etc.)
+      } else {
       await pool.query('DELETE FROM work_order_services WHERE work_order_id = ?', [req.params.id]);
       const servicesList = services.filter(s => s && s.serviceId);
       for (const s of servicesList) {
@@ -718,6 +724,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
             );
           }
         }
+      }
       }
     }
     if (serviceLocation !== undefined) {
@@ -869,6 +876,63 @@ router.post('/:id/measurements', authenticateToken, async (req, res) => {
     res.status(201).json({ id: result.insertId, message: 'Measurement added successfully' });
   } catch (error) {
     console.error('Add measurement error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update measurement (notes and housing values) — solo administradores; técnicos no pueden modificar mediciones ya registradas
+router.put('/:id/measurements/:measurementId', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { notes, housingMeasurements } = req.body;
+    const workOrderId = req.params.id;
+    const measurementId = req.params.measurementId;
+    const pool = await getConnection();
+
+    const [measRows] = await pool.query(
+      'SELECT id FROM measurements WHERE id = ? AND work_order_id = ?',
+      [measurementId, workOrderId]
+    );
+    if (measRows.length === 0) {
+      return res.status(404).json({ error: 'Medición no encontrada' });
+    }
+
+    if (notes !== undefined) {
+      await pool.query('UPDATE measurements SET notes = ? WHERE id = ?', [notes ?? null, measurementId]);
+    }
+
+    if (Array.isArray(housingMeasurements)) {
+      await pool.query('DELETE FROM work_order_housing_measurements WHERE measurement_id = ?', [measurementId]);
+      if (housingMeasurements.length > 0) {
+        const housingIds = [...new Set(housingMeasurements.map(hm => hm.housingId || hm.housing_id).filter(Boolean))];
+        if (housingIds.length > 0) {
+          const [existing] = await pool.query(
+            'SELECT id FROM work_order_housings WHERE work_order_id = ? AND id IN (?)',
+            [workOrderId, housingIds]
+          );
+          const existingSet = new Set(existing.map(r => r.id));
+          const invalid = housingIds.filter(id => !existingSet.has(id));
+          if (invalid.length > 0) {
+            return res.status(400).json({ error: 'Alojamientos inválidos para esta orden' });
+          }
+        }
+        const values = housingMeasurements.map((hm) => ([
+          measurementId,
+          hm.housingId || hm.housing_id,
+          hm.x1 !== undefined && hm.x1 !== null && hm.x1 !== '' ? hm.x1 : null,
+          hm.y1 !== undefined && hm.y1 !== null && hm.y1 !== '' ? hm.y1 : null,
+          hm.unit || null
+        ]));
+        await pool.query(
+          `INSERT INTO work_order_housing_measurements (measurement_id, housing_id, x1, y1, unit) VALUES ?`,
+          [values]
+        );
+      }
+    }
+
+    await logActivity(req.user.id, 'UPDATE', 'measurement', measurementId, 'Medición actualizada', req.ip);
+    res.json({ message: 'Medición actualizada correctamente' });
+  } catch (error) {
+    console.error('Update measurement error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
