@@ -392,14 +392,23 @@ export default function WorkOrderDetail() {
     if (!Array.isArray(housings) || housings.length === 0) return false;
     return housings.some(hm => (hm.x1 != null && hm.x1 !== '') || (hm.y1 != null && hm.y1 !== '') || (hm.unit != null && hm.unit !== ''));
   };
-  const initialMeasurements = measurementsList.filter(m => {
-    const t = String(m?.measurement_type ?? m?.measurementType ?? '').toLowerCase();
-    return t === 'initial';
-  }).filter(measurementHasData);
-  const finalMeasurements = measurementsList.filter(m => {
-    const t = String(m?.measurement_type ?? m?.measurementType ?? '').toLowerCase();
-    return t === 'final';
-  }).filter(measurementHasData);
+  const getMeasurementDate = (m) => new Date(m?.measurement_date ?? m?.measurementDate ?? 0).getTime();
+  const initialMeasurements = measurementsList
+    .filter(m => {
+      const t = String(m?.measurement_type ?? m?.measurementType ?? '').toLowerCase();
+      return t === 'initial';
+    })
+    .filter(measurementHasData)
+    .sort((a, b) => getMeasurementDate(b) - getMeasurementDate(a))
+    .slice(0, 1);
+  const finalMeasurements = measurementsList
+    .filter(m => {
+      const t = String(m?.measurement_type ?? m?.measurementType ?? '').toLowerCase();
+      return t === 'final';
+    })
+    .filter(measurementHasData)
+    .sort((a, b) => getMeasurementDate(b) - getMeasurementDate(a))
+    .slice(0, 1);
 
   // Calcular días trabajados
   const calculateWorkingDays = () => {

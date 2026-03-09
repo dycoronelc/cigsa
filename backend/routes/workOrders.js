@@ -694,8 +694,26 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (services !== undefined && Array.isArray(services)) {
       const [measCount] = await pool.query('SELECT COUNT(*) AS c FROM measurements WHERE work_order_id = ?', [req.params.id]);
       if ((measCount[0]?.c || 0) > 0) {
-        // Hay mediciones: no borrar ni reinsertar servicios/housings para no perder datos de mediciones
-        // Se pueden seguir actualizando el resto de campos de la OT (titulo, descripción, etc.)
+        // Hay mediciones: actualizar nominal_value, nominal_unit, tolerance y description de los housings existentes sin borrar
+        for (const s of services) {
+          const housings = Array.isArray(s.housings) ? s.housings : [];
+          for (const h of housings) {
+            const code = h.measureCode || h.measure_code;
+            if (!code) continue;
+            const nomVal = h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? h.nominalValue : null;
+            const nomUnit = h.unit || h.nominalUnit || h.nominal_unit || null;
+            const tol = h.tolerance || null;
+            const desc = h.description || null;
+            await pool.query(
+              `UPDATE work_order_housings SET nominal_value = ?, nominal_unit = ?, tolerance = ?, description = ? WHERE work_order_id = ? AND measure_code = ?`,
+              [nomVal, nomUnit, tol, desc, req.params.id, code]
+            );
+          }
+        }
+        // Marcar como modificado para que no caiga en "No fields to update"
+        if (updateFields.length === 0) {
+          updateFields.push('updated_at = NOW()');
+        }
       } else {
       await pool.query('DELETE FROM work_order_services WHERE work_order_id = ?', [req.params.id]);
       const servicesList = services.filter(s => s && s.serviceId);
