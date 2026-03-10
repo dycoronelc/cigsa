@@ -274,47 +274,6 @@ export async function generateWorkOrderReport(orderData) {
     });
     y += 16;
 
-    const fotosPlanosHeight = 80;
-    y = ensureSpace(doc, reportDate, y, fotosPlanosHeight);
-
-    doc.font('Helvetica-Bold').text('Fotos', MARGIN, y);
-    y += 12;
-    doc.font('Helvetica').text(photos.length > 0 ? `${photos.length} foto(s) registrada(s) en el sistema.` : 'Sin fotos registradas.', MARGIN, y);
-    y += 20;
-
-    const blueprints = documents.filter((d) => d.document_type === 'blueprint' || (d.file_name && /\.(pdf|png|jpg|jpeg|gif|webp)$/i.test(d.file_name)));
-    if (blueprints.length > 0) {
-      const imagePlanos = blueprints.filter((d) => d.file_name && IMAGE_EXT.test(d.file_name));
-      if (imagePlanos.length > 0) {
-        y = ensureSpace(doc, reportDate, y, 20);
-        doc.font('Helvetica-Bold').text('Planos / Documentos', MARGIN, y);
-        y += 16;
-        doc.font('Helvetica').fontSize(9);
-
-        imagePlanos.forEach((d) => {
-          y = ensureSpace(doc, reportDate, y, PLANO_ITEM_HEIGHT);
-          const absPath = getDocumentFilePath(d);
-          const name = d.file_name || 'Documento';
-          if (absPath && fs.existsSync(absPath)) {
-            try {
-              doc.image(absPath, MARGIN, y, { fit: [CONTENT_WIDTH, MAX_PLANO_IMAGE_HEIGHT], align: 'center', valign: 'top' });
-              y += MAX_PLANO_IMAGE_HEIGHT + 4;
-              doc.fillColor('#333').text(name, MARGIN, y, { width: CONTENT_WIDTH });
-              y += 14;
-            } catch (_) {
-              doc.text(`• ${name}`, MARGIN + 10, y);
-              y += 14;
-            }
-          } else {
-            doc.text(`• ${name}`, MARGIN + 10, y);
-            y += 14;
-          }
-        });
-        doc.fillColor('black');
-        y += 16;
-      }
-    }
-
     if (order.description) {
       const descHeight = 50;
       y = ensureSpace(doc, reportDate, y, descHeight);
@@ -324,11 +283,70 @@ export async function generateWorkOrderReport(orderData) {
       y += 30;
     }
 
+    // Firma del Superintendente al final de la página 1 (descripción de servicios)
+    const conformitySuperintendente = order.conformity_signature_superintendente || null;
+    const signatureBlockHeight = 100;
+    y = ensureSpace(doc, reportDate, y, signatureBlockHeight);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Firma del Superintendente', MARGIN, y);
+    y += 18;
+    if (conformitySuperintendente && conformitySuperintendente.signature_data) {
+      const sigBuf = signatureDataToBuffer(conformitySuperintendente.signature_data);
+      if (sigBuf) {
+        try {
+          doc.image(sigBuf, MARGIN, y, { width: 180, height: 60, fit: [180, 60] });
+          y += 62;
+        } catch (_) {
+          doc.font('Helvetica').fontSize(9).fillColor('#555').text('(Imagen de firma no disponible)', MARGIN, y);
+          y += 16;
+        }
+      } else {
+        doc.font('Helvetica').fontSize(9).fillColor('#555').text('(Firma no disponible)', MARGIN, y);
+        y += 16;
+      }
+      doc.font('Helvetica').fontSize(10).fillColor('black');
+      doc.text(`Nombre: ${conformitySuperintendente.signed_by_name || '-'}`, MARGIN, y);
+      y += 14;
+      doc.text(`Fecha: ${formatDateTime(conformitySuperintendente.signed_at)}`, MARGIN, y);
+      y += 22;
+    } else {
+      doc.font('Helvetica').fontSize(9).fillColor('#555').text('Sin firma registrada.', MARGIN, y);
+      y += 24;
+    }
+
     doc.addPage();
     y = CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
 
-    // ----- PÁGINA 2: METROLOGÍA -----
+    // ----- PÁGINA 2: PLANOS/DOCUMENTOS (al inicio) y METROLOGÍA -----
     drawHeader(doc, reportDate);
+
+    const blueprints = documents.filter((d) => d.document_type === 'blueprint' || (d.file_name && /\.(pdf|png|jpg|jpeg|gif|webp)$/i.test(d.file_name)));
+    const imagePlanos = blueprints.filter((d) => d.file_name && IMAGE_EXT.test(d.file_name));
+    if (imagePlanos.length > 0) {
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Planos / Documentos', MARGIN, y);
+      y += 16;
+      doc.font('Helvetica').fontSize(9);
+      imagePlanos.forEach((d) => {
+        y = ensureSpace(doc, reportDate, y, PLANO_ITEM_HEIGHT);
+        const absPath = getDocumentFilePath(d);
+        const name = d.file_name || 'Documento';
+        if (absPath && fs.existsSync(absPath)) {
+          try {
+            doc.image(absPath, MARGIN, y, { fit: [CONTENT_WIDTH, MAX_PLANO_IMAGE_HEIGHT], align: 'center', valign: 'top' });
+            y += MAX_PLANO_IMAGE_HEIGHT + 4;
+            doc.fillColor('#333').text(name, MARGIN, y, { width: CONTENT_WIDTH });
+            y += 14;
+          } catch (_) {
+            doc.text(`• ${name}`, MARGIN + 10, y);
+            y += 14;
+          }
+        } else {
+          doc.text(`• ${name}`, MARGIN + 10, y);
+          y += 14;
+        }
+      });
+      doc.fillColor('black');
+      y += 16;
+    }
 
     doc.fontSize(12).font('Helvetica-Bold').fillColor('black').text('METROLOGÍA DE ALOJAMIENTOS', MARGIN, y);
     y += 18;
@@ -499,25 +517,17 @@ export async function generateWorkOrderReport(orderData) {
       });
     }
 
-    doc.font('Helvetica').fontSize(8).fillColor('#555');
-    doc.text(`Reporte OT: ${order.order_number || order.id} - ${formatDate(order.created_at)}`, MARGIN, y + 10);
-
-    // ----- PÁGINA FINAL: FIRMA DEL SUPERVISOR Y ANEXOS FOTOGRÁFICOS -----
-    doc.addPage();
-    y = CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
-    drawHeader(doc, reportDate);
-
-    const conformitySignature = order.conformity_signature || null;
-    const signatureHeight = 100;
-    y = ensureSpace(doc, reportDate, y, signatureHeight);
-
-    doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Firma del Supervisor que recibe el trabajo', MARGIN, y);
+    // Firma del Capataz al final de la página 2 (después de medidas finales)
+    const conformityCapataz = order.conformity_signature_capataz || null;
+    const signatureBlockHeight2 = 100;
+    y = ensureSpace(doc, reportDate, y, signatureBlockHeight2);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Firma del Capataz que recibe el trabajo', MARGIN, y);
     y += 18;
-    if (conformitySignature && conformitySignature.signature_data) {
-      const sigBuf = signatureDataToBuffer(conformitySignature.signature_data);
-      if (sigBuf) {
+    if (conformityCapataz && conformityCapataz.signature_data) {
+      const sigBufCap = signatureDataToBuffer(conformityCapataz.signature_data);
+      if (sigBufCap) {
         try {
-          doc.image(sigBuf, MARGIN, y, { width: 180, height: 60, fit: [180, 60] });
+          doc.image(sigBufCap, MARGIN, y, { width: 180, height: 60, fit: [180, 60] });
           y += 62;
         } catch (_) {
           doc.font('Helvetica').fontSize(9).fillColor('#555').text('(Imagen de firma no disponible)', MARGIN, y);
@@ -528,49 +538,67 @@ export async function generateWorkOrderReport(orderData) {
         y += 16;
       }
       doc.font('Helvetica').fontSize(10).fillColor('black');
-      doc.text(`Nombre: ${conformitySignature.signed_by_name || '-'}`, MARGIN, y);
+      doc.text(`Nombre: ${conformityCapataz.signed_by_name || '-'}`, MARGIN, y);
       y += 14;
-      doc.text(`Fecha: ${formatDateTime(conformitySignature.signed_at)}`, MARGIN, y);
-      y += 24;
+      doc.text(`Fecha: ${formatDateTime(conformityCapataz.signed_at)}`, MARGIN, y);
+      y += 22;
     } else {
-      doc.font('Helvetica').fontSize(9).fillColor('#555').text('Sin firma registrada. El supervisor del cliente puede firmar desde la vista de técnicos.', MARGIN, y);
-      y += 28;
+      doc.font('Helvetica').fontSize(9).fillColor('#555').text('Sin firma registrada.', MARGIN, y);
+      y += 24;
     }
 
-    const annexTitleHeight = 30;
-    y = ensureSpace(doc, reportDate, y, annexTitleHeight);
+    doc.font('Helvetica').fontSize(8).fillColor('#555');
+    doc.text(`Reporte OT: ${order.order_number || order.id} - ${formatDate(order.created_at)}`, MARGIN, y + 10);
+
+    // ----- PÁGINA(S) SIGUIENTE(S): ANEXOS FOTOGRÁFICOS (3 fotos por fila) -----
+    const photosForAnnex = photos || [];
+    const photoTypes = { inspection: 'Inspección', during_service: 'Durante el servicio', completion: 'Finalización' };
+    const PHOTOS_PER_ROW = 3;
+    const photoGap = 8;
+    const photoCellW = (CONTENT_WIDTH - (PHOTOS_PER_ROW - 1) * photoGap) / PHOTOS_PER_ROW;
+    const photoCellH = 110;
+    const photoRowHeight = photoCellH + 18;
+
+    doc.addPage();
+    y = CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
+    drawHeader(doc, reportDate);
+
     doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Anexos Fotográficos', MARGIN, y);
     y += 20;
-
-    const photoTypes = { inspection: 'Inspección', during_service: 'Durante el servicio', completion: 'Finalización' };
-    const maxPhotoHeight = 160;
-    const photosForAnnex = photos || [];
 
     if (photosForAnnex.length === 0) {
       doc.font('Helvetica').fontSize(9).fillColor('#555').text('No hay fotos adjuntas para esta orden de trabajo.', MARGIN, y);
       y += 20;
     } else {
-      photosForAnnex.forEach((photo, index) => {
-        const absPath = getPhotoFilePath(photo);
-        const typeLabel = photoTypes[photo.photo_type] || photo.photo_type || 'Foto';
-        const caption = photo.description ? `${typeLabel}: ${(photo.description || '').slice(0, 60)}` : typeLabel;
-
-        y = ensureSpace(doc, reportDate, y, maxPhotoHeight + 28);
-        doc.font('Helvetica').fontSize(9).fillColor('#333').text(`Foto ${index + 1} - ${caption}`, MARGIN, y);
-        y += 14;
-
-        if (absPath && fs.existsSync(absPath)) {
-          try {
-            doc.image(absPath, MARGIN, y, { fit: [CONTENT_WIDTH, maxPhotoHeight], align: 'center', valign: 'top' });
-            y += maxPhotoHeight + 12;
-          } catch (_) {
-            doc.font('Helvetica').fontSize(8).fillColor('#888').text('(No se pudo cargar la imagen)', MARGIN, y);
-            y += 20;
+      const rows = [];
+      for (let i = 0; i < photosForAnnex.length; i += PHOTOS_PER_ROW) {
+        rows.push(photosForAnnex.slice(i, i + PHOTOS_PER_ROW));
+      }
+      rows.forEach((rowPhotos) => {
+        y = ensureSpace(doc, reportDate, y, photoRowHeight);
+        const rowStartY = y;
+        rowPhotos.forEach((photo, colIndex) => {
+          const absPath = getPhotoFilePath(photo);
+          const x = MARGIN + colIndex * (photoCellW + photoGap);
+          if (absPath && fs.existsSync(absPath)) {
+            try {
+              doc.image(absPath, x, y, { fit: [photoCellW, photoCellH], align: 'center', valign: 'top' });
+            } catch (_) {
+              doc.font('Helvetica').fontSize(7).fillColor('#888').text('(Error)', x, y + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
+            }
+          } else {
+            doc.font('Helvetica').fontSize(7).fillColor('#888').text('(No encontrada)', x, y + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
           }
-        } else {
-          doc.font('Helvetica').fontSize(8).fillColor('#888').text('(Archivo no encontrado)', MARGIN, y);
-          y += 18;
-        }
+        });
+        y += photoCellH + 6;
+        doc.font('Helvetica').fontSize(8).fillColor('#333');
+        rowPhotos.forEach((photo, colIndex) => {
+          const typeLabel = photoTypes[photo.photo_type] || photo.photo_type || 'Foto';
+          const caption = (photo.description ? `${typeLabel}: ${(photo.description || '').slice(0, 25)}` : typeLabel).slice(0, 28);
+          const x = MARGIN + colIndex * (photoCellW + photoGap);
+          doc.text(caption, x, y, { width: photoCellW, align: 'center' });
+        });
+        y += 14;
       });
     }
 

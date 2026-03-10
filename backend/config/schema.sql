@@ -294,14 +294,16 @@ CREATE TABLE IF NOT EXISTS activity_log (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
--- Firma de conformidad del supervisor del cliente
+-- Firmas de conformidad: Capataz y Superintendente (cada una con su nombre)
 CREATE TABLE IF NOT EXISTS work_order_conformity_signatures (
   id INT PRIMARY KEY AUTO_INCREMENT,
   work_order_id INT NOT NULL,
+  signature_role ENUM('capataz', 'superintendente') NOT NULL DEFAULT 'capataz',
   signature_data TEXT NOT NULL,
   signed_by_name VARCHAR(200) NOT NULL,
   signed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
+  FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_work_order_signature_role (work_order_id, signature_role)
 );
 
 -- Indexes for better performance

@@ -66,13 +66,17 @@ export default function TechnicianWorkOrderDetail() {
   const [observationData, setObservationData] = useState({ observation: '', observationType: 'general' });
   const [expandedPhoto, setExpandedPhoto] = useState(null);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
-  const [signatureData, setSignatureData] = useState({ signedBy: '', canvasRef: null });
-  const [existingSignature, setExistingSignature] = useState(null);
+  const [signatureDataCapataz, setSignatureDataCapataz] = useState({ signedBy: '' });
+  const [signatureDataSuperintendente, setSignatureDataSuperintendente] = useState({ signedBy: '' });
+  const [existingSignatureCapataz, setExistingSignatureCapataz] = useState(null);
+  const [existingSignatureSuperintendente, setExistingSignatureSuperintendente] = useState(null);
   const [activityLog, setActivityLog] = useState([]);
   const [loadingActivity, setLoadingActivity] = useState(false);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
-  const signatureCanvasRef = useRef(null);
+  const signatureCanvasRefCapataz = useRef(null);
+  const signatureCanvasRefSuperintendente = useRef(null);
+  const activeSignatureCanvasRef = useRef(null);
 
   const isDocVisibleToTechnician = (d) => {
     const v = d?.is_visible_to_technician;
@@ -152,30 +156,33 @@ export default function TechnicianWorkOrderDetail() {
   }, [activeTab, id]);
 
   const openSignatureModal = async () => {
-    setSignatureData({ signedBy: '' });
-    setExistingSignature(null);
+    setSignatureDataCapataz({ signedBy: '' });
+    setSignatureDataSuperintendente({ signedBy: '' });
+    setExistingSignatureCapataz(null);
+    setExistingSignatureSuperintendente(null);
     setShowSignatureModal(true);
-    if (order?.conformity_signature) {
-      try {
-        const res = await api.get(`/work-orders/${id}/conformity-signature`);
-        if (res.data?.signature_data) setExistingSignature(res.data);
-      } catch (e) {
-        setExistingSignature(null);
-      }
+    try {
+      const res = await api.get(`/work-orders/${id}/conformity-signature`);
+      const data = res.data || {};
+      if (data.capataz) setExistingSignatureCapataz(data.capataz);
+      if (data.superintendente) setExistingSignatureSuperintendente(data.superintendente);
+    } catch (e) {
+      setExistingSignatureCapataz(null);
+      setExistingSignatureSuperintendente(null);
     }
     setTimeout(() => {
-      const canvas = signatureCanvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2;
-      }
+      [signatureCanvasRefCapataz.current, signatureCanvasRefSuperintendente.current].forEach((canvas) => {
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 2;
+        }
+      });
     }, 100);
   };
 
-  const getSignatureCoords = (e) => {
-    const canvas = signatureCanvasRef.current;
+  const getSignatureCoords = (canvas, e) => {
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -187,9 +194,9 @@ export default function TechnicianWorkOrderDetail() {
   };
 
   const handleSignatureStart = (e) => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const coords = getSignatureCoords(e);
+    const canvas = e.currentTarget;
+    activeSignatureCanvasRef.current = canvas;
+    const coords = getSignatureCoords(canvas, e);
     if (!coords) return;
     const ctx = canvas.getContext('2d');
     ctx.beginPath();
@@ -197,9 +204,8 @@ export default function TechnicianWorkOrderDetail() {
   };
 
   const handleSignatureMove = (e) => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const coords = getSignatureCoords(e);
+    const canvas = activeSignatureCanvasRef.current || e.currentTarget;
+    const coords = getSignatureCoords(canvas, e);
     if (!coords) return;
     const ctx = canvas.getContext('2d');
     ctx.lineTo(coords.x, coords.y);
@@ -207,38 +213,77 @@ export default function TechnicianWorkOrderDetail() {
   };
 
   const handleSignatureEnd = () => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.closePath();
+    const canvas = activeSignatureCanvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.closePath();
+    }
+    activeSignatureCanvasRef.current = null;
   };
 
-  const clearSignature = () => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const clearSignatureCapataz = () => {
+    const canvas = signatureCanvasRefCapataz.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
   };
 
-  const submitConformitySignature = async () => {
-    if (!signatureData.signedBy || !signatureData.signedBy.trim()) {
-      showError('Indique el nombre del supervisor del cliente');
+  const clearSignatureSuperintendente = () => {
+    const canvas = signatureCanvasRefSuperintendente.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  };
+
+  const submitConformitySignatureCapataz = async () => {
+    if (!signatureDataCapataz.signedBy || !signatureDataCapataz.signedBy.trim()) {
+      showError('Indique el nombre del capataz');
       return;
     }
-    const canvas = signatureCanvasRef.current;
+    const canvas = signatureCanvasRefCapataz.current;
     if (!canvas) return;
     const dataUrl = canvas.toDataURL('image/png');
     if (!dataUrl || dataUrl.length < 100) {
-      showError('Capture la firma en el recuadro');
+      showError('Capture la firma del capataz en el recuadro');
       return;
     }
     try {
       await api.post(`/work-orders/${id}/conformity-signature`, {
         signatureData: dataUrl,
-        signedBy: signatureData.signedBy.trim()
+        signedBy: signatureDataCapataz.signedBy.trim(),
+        role: 'capataz'
       });
-      showSuccess('Firma de conformidad registrada');
-      setShowSignatureModal(false);
+      showSuccess('Firma del capataz registrada');
+      setExistingSignatureCapataz({ signature_data: dataUrl, signed_by_name: signatureDataCapataz.signedBy.trim(), signed_at: new Date().toISOString() });
+      fetchOrder();
+      if (activeTab === 'bitacora') fetchActivity();
+    } catch (error) {
+      showError(error.response?.data?.error || 'Error al guardar la firma');
+    }
+  };
+
+  const submitConformitySignatureSuperintendente = async () => {
+    if (!signatureDataSuperintendente.signedBy || !signatureDataSuperintendente.signedBy.trim()) {
+      showError('Indique el nombre del superintendente');
+      return;
+    }
+    const canvas = signatureCanvasRefSuperintendente.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    if (!dataUrl || dataUrl.length < 100) {
+      showError('Capture la firma del superintendente en el recuadro');
+      return;
+    }
+    try {
+      await api.post(`/work-orders/${id}/conformity-signature`, {
+        signatureData: dataUrl,
+        signedBy: signatureDataSuperintendente.signedBy.trim(),
+        role: 'superintendente'
+      });
+      showSuccess('Firma del superintendente registrada');
+      setExistingSignatureSuperintendente({ signature_data: dataUrl, signed_by_name: signatureDataSuperintendente.signedBy.trim(), signed_at: new Date().toISOString() });
       fetchOrder();
       if (activeTab === 'bitacora') fetchActivity();
     } catch (error) {
@@ -426,11 +471,17 @@ export default function TechnicianWorkOrderDetail() {
           <option value="cancelled">Cancelada</option>
         </select>
         <button type="button" className="btn-primary" onClick={openSignatureModal} style={{ marginLeft: 8 }}>
-          Firma de conformidad
+          Firmas de conformidad
         </button>
-        {order.conformity_signature && (
+        {(order.conformity_signature_capataz || order.conformity_signature_superintendente) && (
           <span style={{ fontSize: 13, color: 'var(--text-light)' }}>
-            Firmado por {order.conformity_signature.signed_by_name} el {new Date(order.conformity_signature.signed_at).toLocaleString('es-PA')}
+            {order.conformity_signature_capataz && (
+              <>Capataz: {order.conformity_signature_capataz.signed_by_name}</>
+            )}
+            {order.conformity_signature_capataz && order.conformity_signature_superintendente && ' · '}
+            {order.conformity_signature_superintendente && (
+              <>Superintendente: {order.conformity_signature_superintendente.signed_by_name}</>
+            )}
           </span>
         )}
       </div>
@@ -860,62 +911,110 @@ export default function TechnicianWorkOrderDetail() {
 
       {showSignatureModal && (
         <div className="modal-overlay" onClick={() => setShowSignatureModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
-            <h2>Firma de conformidad</h2>
-            {existingSignature?.signature_data ? (
-              <div style={{ marginBottom: 20 }}>
-                <p style={{ marginBottom: 8, fontWeight: 600 }}>Firma registrada</p>
-                <img
-                  src={existingSignature.signature_data}
-                  alt="Firma de conformidad"
-                  style={{ maxWidth: '100%', height: 'auto', border: '1px solid #ddd', borderRadius: 6, background: '#fff' }}
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h2>Firmas de conformidad</h2>
+            <p style={{ marginTop: -8, marginBottom: 16, color: 'var(--text-light)', fontSize: 14 }}>
+              Registre la firma del Capataz y del Superintendente, cada una con su nombre.
+            </p>
+
+            <div style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--border)' }}>
+              <h3 style={{ fontSize: 15, marginBottom: 12 }}>Firma del Capataz</h3>
+              {existingSignatureCapataz?.signature_data ? (
+                <div style={{ marginBottom: 12 }}>
+                  <img
+                    src={existingSignatureCapataz.signature_data}
+                    alt="Firma capataz"
+                    style={{ maxWidth: '100%', height: 'auto', border: '1px solid #ddd', borderRadius: 6, background: '#fff' }}
+                  />
+                  <p style={{ marginTop: 6, color: 'var(--text-light)', fontSize: 13 }}>
+                    Firmado por <strong>{existingSignatureCapataz.signed_by_name}</strong> el {new Date(existingSignatureCapataz.signed_at).toLocaleString('es-PA')}
+                  </p>
+                  <p style={{ marginTop: 4, fontSize: 12, color: 'var(--text-light)' }}>Puede registrar una nueva firma a continuación.</p>
+                </div>
+              ) : null}
+              <div className="form-group" style={{ marginBottom: 8 }}>
+                <label>Nombre del capataz *</label>
+                <input
+                  type="text"
+                  value={signatureDataCapataz.signedBy}
+                  onChange={(e) => setSignatureDataCapataz((s) => ({ ...s, signedBy: e.target.value }))}
+                  placeholder="Ej: Juan Pérez"
                 />
-                <p style={{ marginTop: 8, color: 'var(--text-light)', fontSize: 14 }}>
-                  Firmado por <strong>{existingSignature.signed_by_name}</strong> el {new Date(existingSignature.signed_at).toLocaleString('es-PA')}
-                </p>
-                <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--border)' }} />
-                <p style={{ marginBottom: 12, color: 'var(--text-light)', fontSize: 14 }}>
-                  Puede registrar una nueva firma a continuación si lo desea.
-                </p>
               </div>
-            ) : (
-              <p style={{ marginTop: -8, marginBottom: 12, color: 'var(--text-light)', fontSize: 14 }}>
-                El supervisor del cliente debe firmar en el recuadro e indicar su nombre.
-              </p>
-            )}
-            <div className="form-group">
-              <label>Nombre del supervisor del cliente *</label>
-              <input
-                type="text"
-                value={signatureData.signedBy}
-                onChange={(e) => setSignatureData((s) => ({ ...s, signedBy: e.target.value }))}
-                placeholder="Ej: Juan Pérez"
-              />
-            </div>
-            <div className="form-group">
-              <label>Firma</label>
-              <canvas
-                ref={signatureCanvasRef}
-                width={400}
-                height={180}
-                style={{ border: '1px solid #ccc', borderRadius: 6, touchAction: 'none', width: '100%', maxWidth: 400, height: 180 }}
-                onMouseDown={handleSignatureStart}
-                onMouseMove={handleSignatureMove}
-                onMouseUp={handleSignatureEnd}
-                onMouseLeave={handleSignatureEnd}
-                onTouchStart={(e) => { e.preventDefault(); handleSignatureStart(e.touches[0]); }}
-                onTouchMove={(e) => { e.preventDefault(); handleSignatureMove(e.touches[0]); }}
-                onTouchEnd={(e) => { e.preventDefault(); handleSignatureEnd(); }}
-              />
-              <button type="button" className="btn-secondary" onClick={clearSignature} style={{ marginTop: 8 }}>
-                Limpiar firma
+              <div className="form-group">
+                <label>Firma</label>
+                <canvas
+                  ref={signatureCanvasRefCapataz}
+                  width={400}
+                  height={140}
+                  style={{ border: '1px solid #ccc', borderRadius: 6, touchAction: 'none', width: '100%', maxWidth: 400, height: 140 }}
+                  onMouseDown={handleSignatureStart}
+                  onMouseMove={handleSignatureMove}
+                  onMouseUp={handleSignatureEnd}
+                  onMouseLeave={handleSignatureEnd}
+                  onTouchStart={(e) => { e.preventDefault(); handleSignatureStart(e); }}
+                  onTouchMove={(e) => { e.preventDefault(); handleSignatureMove(e); }}
+                  onTouchEnd={(e) => { e.preventDefault(); handleSignatureEnd(); }}
+                />
+                <button type="button" className="btn-secondary" onClick={clearSignatureCapataz} style={{ marginTop: 6 }}>
+                  Limpiar firma
+                </button>
+              </div>
+              <button type="button" className="btn-primary" onClick={submitConformitySignatureCapataz} style={{ marginTop: 8 }}>
+                Guardar firma del capataz
               </button>
             </div>
-            <div className="modal-actions">
+
+            <div>
+              <h3 style={{ fontSize: 15, marginBottom: 12 }}>Firma del Superintendente</h3>
+              {existingSignatureSuperintendente?.signature_data ? (
+                <div style={{ marginBottom: 12 }}>
+                  <img
+                    src={existingSignatureSuperintendente.signature_data}
+                    alt="Firma superintendente"
+                    style={{ maxWidth: '100%', height: 'auto', border: '1px solid #ddd', borderRadius: 6, background: '#fff' }}
+                  />
+                  <p style={{ marginTop: 6, color: 'var(--text-light)', fontSize: 13 }}>
+                    Firmado por <strong>{existingSignatureSuperintendente.signed_by_name}</strong> el {new Date(existingSignatureSuperintendente.signed_at).toLocaleString('es-PA')}
+                  </p>
+                  <p style={{ marginTop: 4, fontSize: 12, color: 'var(--text-light)' }}>Puede registrar una nueva firma a continuación.</p>
+                </div>
+              ) : null}
+              <div className="form-group" style={{ marginBottom: 8 }}>
+                <label>Nombre del superintendente *</label>
+                <input
+                  type="text"
+                  value={signatureDataSuperintendente.signedBy}
+                  onChange={(e) => setSignatureDataSuperintendente((s) => ({ ...s, signedBy: e.target.value }))}
+                  placeholder="Ej: María López"
+                />
+              </div>
+              <div className="form-group">
+                <label>Firma</label>
+                <canvas
+                  ref={signatureCanvasRefSuperintendente}
+                  width={400}
+                  height={140}
+                  style={{ border: '1px solid #ccc', borderRadius: 6, touchAction: 'none', width: '100%', maxWidth: 400, height: 140 }}
+                  onMouseDown={handleSignatureStart}
+                  onMouseMove={handleSignatureMove}
+                  onMouseUp={handleSignatureEnd}
+                  onMouseLeave={handleSignatureEnd}
+                  onTouchStart={(e) => { e.preventDefault(); handleSignatureStart(e); }}
+                  onTouchMove={(e) => { e.preventDefault(); handleSignatureMove(e); }}
+                  onTouchEnd={(e) => { e.preventDefault(); handleSignatureEnd(); }}
+                />
+                <button type="button" className="btn-secondary" onClick={clearSignatureSuperintendente} style={{ marginTop: 6 }}>
+                  Limpiar firma
+                </button>
+              </div>
+              <button type="button" className="btn-primary" onClick={submitConformitySignatureSuperintendente} style={{ marginTop: 8 }}>
+                Guardar firma del superintendente
+              </button>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 20 }}>
               <button type="button" onClick={() => setShowSignatureModal(false)}>Cerrar</button>
-              <button type="button" className="btn-primary" onClick={submitConformitySignature}>
-                Guardar firma
-              </button>
             </div>
           </div>
         </div>

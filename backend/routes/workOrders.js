@@ -171,13 +171,18 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
 
     const [photos] = await pool.query('SELECT * FROM work_order_photos WHERE work_order_id = ? ORDER BY created_at', [workOrderId]);
 
-    let conformitySignature = null;
+    let conformityCapataz = null;
+    let conformitySuperintendente = null;
     try {
       const [sigRows] = await pool.query(
-        'SELECT id, signature_data, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ? ORDER BY signed_at DESC LIMIT 1',
+        'SELECT id, signature_role, signature_data, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ?',
         [workOrderId]
       );
-      conformitySignature = sigRows[0] || null;
+      sigRows.forEach((r) => {
+        const role = (r.signature_role || '').toLowerCase();
+        if (role === 'superintendente') conformitySuperintendente = r;
+        else conformityCapataz = r;
+      });
     } catch (_) {}
 
     let documents = [];
@@ -224,7 +229,8 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       measurements: measurementsWithHousing,
       photos: photos || [],
       documents: documents || [],
-      conformity_signature: conformitySignature
+      conformity_signature_capataz: conformityCapataz,
+      conformity_signature_superintendente: conformitySuperintendente
     };
 
     const { generateWorkOrderReport } = await import('../lib/pdfReport.js');
@@ -491,15 +497,20 @@ router.get('/:id', authenticateToken, async (req, res) => {
       documents = documents.filter((d) => isVisibleToTechnician(d.is_visible_to_technician));
     }
 
-    let conformitySignature = null;
+    let conformityCapataz = null;
+    let conformitySuperintendente = null;
     try {
       const [sigRows] = await pool.query(
-        'SELECT id, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ? ORDER BY signed_at DESC LIMIT 1',
+        'SELECT id, signature_role, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ?',
         [req.params.id]
       );
-      conformitySignature = sigRows[0] || null;
+      sigRows.forEach((r) => {
+        const role = (r.signature_role || '').toLowerCase();
+        if (role === 'superintendente') conformitySuperintendente = r;
+        else conformityCapataz = r;
+      });
     } catch (e) { /* ignore */ }
-    
+
     res.json({
       ...order,
       services: orderServices,
@@ -508,7 +519,9 @@ router.get('/:id', authenticateToken, async (req, res) => {
       photos: photos || [],
       observations: observations || [],
       documents: documents || [],
-      conformity_signature: conformitySignature
+      conformity_signature_capataz: conformityCapataz,
+      conformity_signature_superintendente: conformitySuperintendente,
+      conformity_signature: conformityCapataz || conformitySuperintendente
     });
   } catch (error) {
     console.error('Get work order error:', error);
@@ -1149,12 +1162,13 @@ router.get('/:id/activity', authenticateToken, async (req, res) => {
   }
 });
 
-// Firma de conformidad (supervisor del cliente)
+// Firma de conformidad (Capataz o Superintendente)
 router.post('/:id/conformity-signature', authenticateToken, async (req, res) => {
   try {
-    const { signatureData, signedBy } = req.body;
+    const { signatureData, signedBy, role } = req.body;
+    const signatureRole = (role === 'superintendente' ? 'superintendente' : 'capataz').toLowerCase();
     if (!signatureData || !signedBy || typeof signedBy !== 'string' || signedBy.trim() === '') {
-      return res.status(400).json({ error: 'Se requiere firma y nombre del supervisor' });
+      return res.status(400).json({ error: `Se requiere firma y nombre del ${signatureRole === 'superintendente' ? 'superintendente' : 'capataz'}` });
     }
     const pool = await getConnection();
     const [orders] = await pool.query('SELECT id, assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
@@ -1162,19 +1176,22 @@ router.post('/:id/conformity-signature', authenticateToken, async (req, res) => 
     if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
+    const roleLabel = signatureRole === 'superintendente' ? 'Superintendente' : 'Capataz';
     await pool.query(
-      'INSERT INTO work_order_conformity_signatures (work_order_id, signature_data, signed_by_name) VALUES (?, ?, ?)',
-      [req.params.id, signatureData, signedBy.trim()]
+      `INSERT INTO work_order_conformity_signatures (work_order_id, signature_role, signature_data, signed_by_name)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE signature_data = VALUES(signature_data), signed_by_name = VALUES(signed_by_name), signed_at = CURRENT_TIMESTAMP`,
+      [req.params.id, signatureRole, signatureData, signedBy.trim()]
     );
-    await logActivity(req.user.id, 'CONFORMITY_SIGNATURE', 'work_order', req.params.id, `Firma de conformidad por ${signedBy.trim()}`, req.ip);
-    res.status(201).json({ message: 'Firma de conformidad registrada' });
+    await logActivity(req.user.id, 'CONFORMITY_SIGNATURE', 'work_order', req.params.id, `Firma de conformidad (${roleLabel}) por ${signedBy.trim()}`, req.ip);
+    res.status(201).json({ message: `Firma del ${roleLabel} registrada` });
   } catch (error) {
     console.error('Conformity signature error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get conformity signature for work order
+// Get both conformity signatures for work order
 router.get('/:id/conformity-signature', authenticateToken, async (req, res) => {
   try {
     const pool = await getConnection();
@@ -1184,10 +1201,12 @@ router.get('/:id/conformity-signature', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
     const [rows] = await pool.query(
-      'SELECT id, signature_data, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ? ORDER BY signed_at DESC LIMIT 1',
+      'SELECT id, signature_role, signature_data, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ?',
       [req.params.id]
     );
-    res.json(rows[0] || null);
+    const capataz = rows.find((r) => (r.signature_role || '').toLowerCase() === 'capataz') || null;
+    const superintendente = rows.find((r) => (r.signature_role || '').toLowerCase() === 'superintendente') || null;
+    res.json({ capataz, superintendente });
   } catch (error) {
     console.error('Get conformity signature error:', error);
     res.status(500).json({ error: 'Internal server error' });

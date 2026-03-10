@@ -406,7 +406,7 @@ export const initDatabase = async () => {
       }
     }
 
-    // Firma de conformidad
+    // Firma de conformidad (Capataz y Superintendente)
     try {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS work_order_conformity_signatures (
@@ -418,6 +418,33 @@ export const initDatabase = async () => {
           FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
         )
       `);
+      const [cols] = await pool.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'work_order_conformity_signatures' AND COLUMN_NAME = 'signature_role'
+      `);
+      if (cols.length === 0) {
+        await pool.query(`
+          ALTER TABLE work_order_conformity_signatures
+          ADD COLUMN signature_role ENUM('capataz', 'superintendente') NOT NULL DEFAULT 'capataz'
+        `);
+        try {
+          await pool.query(`
+            DELETE t1 FROM work_order_conformity_signatures t1
+            INNER JOIN work_order_conformity_signatures t2
+            ON t1.work_order_id = t2.work_order_id AND t1.signature_role = t2.signature_role AND t1.id < t2.id
+          `);
+        } catch (delErr) {
+          console.warn('Cleanup duplicate signatures:', delErr.message);
+        }
+        try {
+          await pool.query(`
+            ALTER TABLE work_order_conformity_signatures
+            ADD UNIQUE KEY unique_work_order_signature_role (work_order_id, signature_role)
+          `);
+        } catch (ukErr) {
+          console.warn('Unique key work_order_signature_role may already exist or duplicates present:', ukErr.message);
+        }
+      }
     } catch (error) {
       console.error('Error ensuring work_order_conformity_signatures:', error.sqlMessage || error.message);
     }
