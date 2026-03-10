@@ -170,6 +170,16 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
     });
 
     const [photos] = await pool.query('SELECT * FROM work_order_photos WHERE work_order_id = ? ORDER BY created_at', [workOrderId]);
+
+    let conformitySignature = null;
+    try {
+      const [sigRows] = await pool.query(
+        'SELECT id, signature_data, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ? ORDER BY signed_at DESC LIMIT 1',
+        [workOrderId]
+      );
+      conformitySignature = sigRows[0] || null;
+    } catch (_) {}
+
     let documents = [];
     try {
       const [docResults] = await pool.query(`
@@ -213,7 +223,8 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       service_housings: serviceHousings,
       measurements: measurementsWithHousing,
       photos: photos || [],
-      documents: documents || []
+      documents: documents || [],
+      conformity_signature: conformitySignature
     };
 
     const { generateWorkOrderReport } = await import('../lib/pdfReport.js');

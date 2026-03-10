@@ -37,6 +37,26 @@ function getDocumentFilePath(docItem) {
   return path.join(__dirname, '..', 'uploads', 'documents', name);
 }
 
+/** Ruta absoluta de una foto de OT (photo_path ej. /uploads/photos/nombre.ext). */
+function getPhotoFilePath(photo) {
+  const fp = (photo.photo_path || '').trim();
+  const name = path.basename(fp.replace(/^\/+/, ''));
+  if (!name) return null;
+  return path.join(__dirname, '..', 'uploads', 'photos', name);
+}
+
+/** Convierte signature_data (data URL base64) a Buffer para PDFKit, o null. */
+function signatureDataToBuffer(signatureData) {
+  if (!signatureData || typeof signatureData !== 'string') return null;
+  const match = signatureData.match(/^data:image\/\w+;base64,(.+)$/);
+  if (!match) return null;
+  try {
+    return Buffer.from(match[1], 'base64');
+  } catch (_) {
+    return null;
+  }
+}
+
 const IMAGE_EXT = /\.(png|jpg|jpeg|gif|webp)$/i;
 const MAX_PLANO_IMAGE_HEIGHT = 200;
 const PLANO_ITEM_HEIGHT = MAX_PLANO_IMAGE_HEIGHT + 18;
@@ -481,6 +501,78 @@ export async function generateWorkOrderReport(orderData) {
 
     doc.font('Helvetica').fontSize(8).fillColor('#555');
     doc.text(`Reporte OT: ${order.order_number || order.id} - ${formatDate(order.created_at)}`, MARGIN, y + 10);
+
+    // ----- PÁGINA FINAL: FIRMA DEL SUPERVISOR Y ANEXOS FOTOGRÁFICOS -----
+    doc.addPage();
+    y = CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
+    drawHeader(doc, reportDate);
+
+    const conformitySignature = order.conformity_signature || null;
+    const signatureHeight = 100;
+    y = ensureSpace(doc, reportDate, y, signatureHeight);
+
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Firma del Supervisor que recibe el trabajo', MARGIN, y);
+    y += 18;
+    if (conformitySignature && conformitySignature.signature_data) {
+      const sigBuf = signatureDataToBuffer(conformitySignature.signature_data);
+      if (sigBuf) {
+        try {
+          doc.image(sigBuf, MARGIN, y, { width: 180, height: 60, fit: [180, 60] });
+          y += 62;
+        } catch (_) {
+          doc.font('Helvetica').fontSize(9).fillColor('#555').text('(Imagen de firma no disponible)', MARGIN, y);
+          y += 16;
+        }
+      } else {
+        doc.font('Helvetica').fontSize(9).fillColor('#555').text('(Firma no disponible)', MARGIN, y);
+        y += 16;
+      }
+      doc.font('Helvetica').fontSize(10).fillColor('black');
+      doc.text(`Nombre: ${conformitySignature.signed_by_name || '-'}`, MARGIN, y);
+      y += 14;
+      doc.text(`Fecha: ${formatDateTime(conformitySignature.signed_at)}`, MARGIN, y);
+      y += 24;
+    } else {
+      doc.font('Helvetica').fontSize(9).fillColor('#555').text('Sin firma registrada. El supervisor del cliente puede firmar desde la vista de técnicos.', MARGIN, y);
+      y += 28;
+    }
+
+    const annexTitleHeight = 30;
+    y = ensureSpace(doc, reportDate, y, annexTitleHeight);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Anexos Fotográficos', MARGIN, y);
+    y += 20;
+
+    const photoTypes = { inspection: 'Inspección', during_service: 'Durante el servicio', completion: 'Finalización' };
+    const maxPhotoHeight = 160;
+    const photosForAnnex = photos || [];
+
+    if (photosForAnnex.length === 0) {
+      doc.font('Helvetica').fontSize(9).fillColor('#555').text('No hay fotos adjuntas para esta orden de trabajo.', MARGIN, y);
+      y += 20;
+    } else {
+      photosForAnnex.forEach((photo, index) => {
+        const absPath = getPhotoFilePath(photo);
+        const typeLabel = photoTypes[photo.photo_type] || photo.photo_type || 'Foto';
+        const caption = photo.description ? `${typeLabel}: ${(photo.description || '').slice(0, 60)}` : typeLabel;
+
+        y = ensureSpace(doc, reportDate, y, maxPhotoHeight + 28);
+        doc.font('Helvetica').fontSize(9).fillColor('#333').text(`Foto ${index + 1} - ${caption}`, MARGIN, y);
+        y += 14;
+
+        if (absPath && fs.existsSync(absPath)) {
+          try {
+            doc.image(absPath, MARGIN, y, { fit: [CONTENT_WIDTH, maxPhotoHeight], align: 'center', valign: 'top' });
+            y += maxPhotoHeight + 12;
+          } catch (_) {
+            doc.font('Helvetica').fontSize(8).fillColor('#888').text('(No se pudo cargar la imagen)', MARGIN, y);
+            y += 20;
+          }
+        } else {
+          doc.font('Helvetica').fontSize(8).fillColor('#888').text('(Archivo no encontrado)', MARGIN, y);
+          y += 18;
+        }
+      });
+    }
 
     drawFooter(doc);
     doc.end();
