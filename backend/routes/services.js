@@ -17,7 +17,7 @@ router.get('/', authenticateToken, async (req, res) => {
       FROM services s
       LEFT JOIN service_categories sc ON s.category_id = sc.id
       WHERE s.is_active = TRUE
-      ORDER BY s.name
+      ORDER BY s.code
       `
     );
     res.json(services);
