@@ -20,7 +20,8 @@ export default function WorkOrderDetail() {
   const [editData, setEditData] = useState({
     title: '',
     equipmentId: '',
-    serviceLocation: '',
+    locationId: '',
+    serviceTypeId: '',
     clientServiceOrderNumber: '',
     priority: 'medium',
     scheduledDate: '',
@@ -29,6 +30,8 @@ export default function WorkOrderDetail() {
     description: ''
   });
   const [services, setServices] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [serviceTypes, setServiceTypes] = useState([]);
   const [technicians, setTechnicians] = useState([]);
   const [equipmentOptions, setEquipmentOptions] = useState([]);
   const [showHousingsModal, setShowHousingsModal] = useState(false);
@@ -72,12 +75,16 @@ export default function WorkOrderDetail() {
     // lookups for editable selects
     const fetchLookups = async () => {
       try {
-        const [servicesRes, techRes] = await Promise.all([
+        const [servicesRes, techRes, locationsRes, typesRes] = await Promise.all([
           api.get('/services'),
-          api.get('/technicians')
+          api.get('/technicians'),
+          api.get('/locations'),
+          api.get('/service-types')
         ]);
         setServices(servicesRes.data || []);
         setTechnicians(techRes.data || []);
+        setLocations(locationsRes.data || []);
+        setServiceTypes(typesRes.data || []);
       } catch (error) {
         // non-blocking
         console.error('Error fetching lookups:', error);
@@ -146,7 +153,8 @@ export default function WorkOrderDetail() {
     setEditData({
       title: order.title || '',
       equipmentId: order.equipment_id ? String(order.equipment_id) : '',
-      serviceLocation: order.service_location || '',
+      locationId: order.location_id ? String(order.location_id) : '',
+      serviceTypeId: order.service_type_id ? String(order.service_type_id) : '',
       clientServiceOrderNumber: order.client_service_order_number || '',
       priority: order.priority || 'medium',
       scheduledDate: toDateInputValue(order.scheduled_date),
@@ -168,6 +176,10 @@ export default function WorkOrderDetail() {
     });
     setEditMode(true);
   };
+
+  const servicesForOrder = editData.serviceTypeId
+    ? services.filter((s) => String(s.service_type_id) === String(editData.serviceTypeId))
+    : services;
 
   const cancelEdit = () => {
     setEditMode(false);
@@ -281,7 +293,10 @@ export default function WorkOrderDetail() {
     if (editData.equipmentId !== currentEquipmentId) {
       payload.equipmentId = editData.equipmentId ? parseInt(editData.equipmentId) : null;
     }
-    if (editData.serviceLocation !== (order.service_location || '')) payload.serviceLocation = editData.serviceLocation;
+    const currentLocationId = order.location_id ? String(order.location_id) : '';
+    if (editData.locationId !== currentLocationId) payload.locationId = editData.locationId || null;
+    const currentServiceTypeId = order.service_type_id ? String(order.service_type_id) : '';
+    if (editData.serviceTypeId !== currentServiceTypeId) payload.serviceTypeId = editData.serviceTypeId || null;
     if (editData.clientServiceOrderNumber !== (order.client_service_order_number || '')) {
       payload.clientServiceOrderNumber = editData.clientServiceOrderNumber;
     }
@@ -565,13 +580,34 @@ export default function WorkOrderDetail() {
               <div className="info-item">
                 <label>Ubicación del Servicio</label>
                 {editMode ? (
-                  <input
-                    value={editData.serviceLocation}
-                    onChange={(e) => setEditData({ ...editData, serviceLocation: e.target.value })}
-                    placeholder="Ubicación del servicio"
-                  />
+                  <select
+                    value={editData.locationId}
+                    onChange={(e) => setEditData({ ...editData, locationId: e.target.value })}
+                  >
+                    <option value="">Seleccionar ubicación</option>
+                    {locations.map((loc) => (
+                      <option key={loc.id} value={loc.id}>{loc.name}</option>
+                    ))}
+                  </select>
                 ) : (
-                  <p>{order.service_location || 'No especificada'}</p>
+                  <p>{order.location_name || order.service_location || 'No especificada'}</p>
+                )}
+              </div>
+
+              <div className="info-item">
+                <label>Tipo de Servicio</label>
+                {editMode ? (
+                  <select
+                    value={editData.serviceTypeId}
+                    onChange={(e) => setEditData({ ...editData, serviceTypeId: e.target.value })}
+                  >
+                    <option value="">Seleccionar tipo</option>
+                    {serviceTypes.map((st) => (
+                      <option key={st.id} value={st.id}>{st.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p>{order.service_type_name || 'No especificado'}</p>
                 )}
               </div>
 
@@ -668,10 +704,11 @@ export default function WorkOrderDetail() {
                               next[idx] = { ...next[idx], serviceId: val };
                               setEditData({ ...editData, services: next });
                             }}
-                            options={services
+                            options={servicesForOrder
                               .filter(s => !(editData.services || []).some((o, i) => i !== idx && o.serviceId === String(s.id)))
                               .map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
-                            placeholder="Seleccionar servicio..."
+                            placeholder={editData.serviceTypeId ? 'Seleccionar servicio...' : 'Seleccione Tipo de Servicio'}
+                            disabled={!editData.serviceTypeId}
                           />
                         </div>
                         <div style={{ flex: '1 1 100px', minWidth: 100 }}>

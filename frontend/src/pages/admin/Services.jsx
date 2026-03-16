@@ -12,17 +12,20 @@ export default function Services() {
   const { alertDialog, showError, showSuccess, showConfirm, closeAlert } = useAlert();
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [serviceTypes, setServiceTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ 
     name: '', 
     description: '', 
+    serviceTypeId: '', 
     categoryId: '', 
     estimatedDuration: '', 
     standardPrice: '' 
   });
   const [filter, setFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [serviceTypeFilter, setServiceTypeFilter] = useState('');
 
   useEffect(() => {
     fetchServicesAndCategories();
@@ -30,12 +33,14 @@ export default function Services() {
 
   const fetchServicesAndCategories = async () => {
     try {
-      const [servicesRes, categoriesRes] = await Promise.all([
+      const [servicesRes, categoriesRes, typesRes] = await Promise.all([
         api.get('/services'),
-        api.get('/service-categories')
+        api.get('/service-categories'),
+        api.get('/service-types')
       ]);
       setServices(servicesRes.data);
       setCategories(categoriesRes.data);
+      setServiceTypes(typesRes.data);
     } catch (error) {
       console.error('Error fetching services:', error);
     } finally {
@@ -47,14 +52,22 @@ export default function Services() {
     return service.category_name || service.category || '';
   };
 
+  const getServiceTypeLabel = (service) => {
+    return service.service_type_name || '';
+  };
+
   const filteredServices = useMemo(() => {
     return services.filter((service) => {
       if (categoryFilter && getServiceCategoryLabel(service) !== categoryFilter) return false;
+      if (serviceTypeFilter) {
+        const typeLabel = getServiceTypeLabel(service);
+        if (serviceTypeFilter !== typeLabel) return false;
+      }
       if (!filter) return true;
       const search = filter.toLowerCase();
       return service.code?.toLowerCase().includes(search) || service.name?.toLowerCase().includes(search);
     });
-  }, [services, categoryFilter, filter]);
+  }, [services, categoryFilter, serviceTypeFilter, filter]);
 
   const { items: sortedServices, requestSort, getSortDirection } = useSortableData(filteredServices);
 
@@ -69,6 +82,7 @@ export default function Services() {
     try {
       const data = {
         ...formData,
+        serviceTypeId: formData.serviceTypeId ? parseInt(formData.serviceTypeId) : null,
         categoryId: formData.categoryId ? parseInt(formData.categoryId) : null,
         estimatedDuration: formData.estimatedDuration ? parseInt(formData.estimatedDuration) : null,
         standardPrice: formData.standardPrice ? parseFloat(formData.standardPrice) : null
@@ -77,7 +91,7 @@ export default function Services() {
       const res = await api.post('/services', data);
       
       setShowModal(false);
-      setFormData({ name: '', description: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
+      setFormData({ name: '', description: '', serviceTypeId: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
       if (res?.data?.code) {
         showSuccess(`Servicio creado con código ${res.data.code}`);
       }
@@ -104,7 +118,7 @@ export default function Services() {
 
   const handleCloseModal = () => {
     setShowModal(false);
-    setFormData({ name: '', description: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
+    setFormData({ name: '', description: '', serviceTypeId: '', categoryId: '', estimatedDuration: '', standardPrice: '' });
   };
 
   if (loading) return <div className="loading">Cargando...</div>;
@@ -126,6 +140,12 @@ export default function Services() {
               onChange={(e) => setFilter(e.target.value)}
             />
           </div>
+          <select value={serviceTypeFilter} onChange={(e) => setServiceTypeFilter(e.target.value)}>
+            <option value="">Todos los tipos</option>
+            {serviceTypes.map(st => (
+              <option key={st.id} value={st.name}>{st.name}</option>
+            ))}
+          </select>
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">Todas las categorías</option>
             {categories.map(cat => (
@@ -154,6 +174,15 @@ export default function Services() {
                 onChange={(e) => setFormData({...formData, name: e.target.value})} 
                 required 
               />
+              <select
+                value={formData.serviceTypeId}
+                onChange={(e) => setFormData({ ...formData, serviceTypeId: e.target.value })}
+              >
+                <option value="">Seleccionar Tipo de Servicio (Opcional)</option>
+                {serviceTypes.map(st => (
+                  <option key={st.id} value={st.id}>{st.name}</option>
+                ))}
+              </select>
               <select
                 value={formData.categoryId}
                 onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
@@ -200,6 +229,7 @@ export default function Services() {
               <th>Acciones</th>
               <th className="sortable" onClick={() => requestSort('code')}>Código {renderSortIndicator('code')}</th>
               <th className="sortable" onClick={() => requestSort('name')}>Nombre {renderSortIndicator('name')}</th>
+              <th className="sortable" onClick={() => requestSort('service_type_name')}>Tipo de Servicio {renderSortIndicator('service_type_name')}</th>
               <th className="sortable" onClick={() => requestSort('category', (s) => getServiceCategoryLabel(s))}>Categoría {renderSortIndicator('category')}</th>
               <th className="sortable" onClick={() => requestSort('estimated_duration')}>Duración (h) {renderSortIndicator('estimated_duration')}</th>
               <th className="sortable" onClick={() => requestSort('standard_price')}>Precio {renderSortIndicator('standard_price')}</th>
@@ -228,6 +258,7 @@ export default function Services() {
                 </td>
                 <td>{service.code}</td>
                 <td>{service.name}</td>
+                <td>{getServiceTypeLabel(service) || '-'}</td>
                 <td>{getServiceCategoryLabel(service) || '-'}</td>
                 <td>{service.estimated_duration || '-'}</td>
                 <td>{service.standard_price ? `$${parseFloat(service.standard_price).toFixed(2)}` : '-'}</td>

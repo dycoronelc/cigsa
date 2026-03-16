@@ -13,6 +13,8 @@ export default function WorkOrderNew() {
   const [clients, setClients] = useState([]);
   const [equipment, setEquipment] = useState([]);
   const [services, setServices] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [serviceTypes, setServiceTypes] = useState([]);
   const [technicians, setTechnicians] = useState([]);
   const [showHousingsModal, setShowHousingsModal] = useState(false);
   const [editingServiceIdx, setEditingServiceIdx] = useState(null);
@@ -20,7 +22,8 @@ export default function WorkOrderNew() {
   const [formData, setFormData] = useState({
     clientId: '',
     equipmentId: '',
-    serviceLocation: '',
+    locationId: '',
+    serviceTypeId: '',
     clientServiceOrderNumber: '',
     title: '',
     description: '',
@@ -142,18 +145,27 @@ export default function WorkOrderNew() {
 
   const fetchData = async () => {
     try {
-      const [clientsRes, servicesRes, techniciansRes] = await Promise.all([
+      const [clientsRes, servicesRes, techniciansRes, locationsRes, typesRes] = await Promise.all([
         api.get('/clients'),
         api.get('/services'),
-        api.get('/technicians')
+        api.get('/technicians'),
+        api.get('/locations'),
+        api.get('/service-types')
       ]);
       setClients(clientsRes.data);
       setServices(servicesRes.data);
       setTechnicians(techniciansRes.data);
+      setLocations(locationsRes.data);
+      setServiceTypes(typesRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
     }
   };
+
+  // Servicios disponibles según el tipo seleccionado en la OT
+  const servicesForOrder = formData.serviceTypeId
+    ? services.filter((s) => String(s.service_type_id) === String(formData.serviceTypeId))
+    : services;
 
   const fetchEquipment = async (clientId) => {
     try {
@@ -214,7 +226,8 @@ export default function WorkOrderNew() {
         clientId: parseInt(formData.clientId),
         equipmentId: parseInt(formData.equipmentId),
         services: servicesPayload,
-        serviceLocation: formData.serviceLocation || null,
+        locationId: formData.locationId || null,
+        serviceTypeId: formData.serviceTypeId || null,
         clientServiceOrderNumber: formData.clientServiceOrderNumber || null,
         title: formData.title,
         description: formData.description,
@@ -241,7 +254,7 @@ export default function WorkOrderNew() {
   const currentHousings = editingServiceIdx !== null ? (orderServices[editingServiceIdx]?.housings || []) : [];
   let currentServiceName = 'Servicio';
   if (editingServiceIdx !== null && orderServices[editingServiceIdx]?.serviceId) {
-    const svc = services.find(s => s.id === parseInt(orderServices[editingServiceIdx].serviceId));
+    const svc = servicesForOrder.find(s => s.id === parseInt(orderServices[editingServiceIdx].serviceId));
     currentServiceName = svc?.name || 'Servicio';
   }
 
@@ -291,14 +304,34 @@ export default function WorkOrderNew() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="serviceLocation">Ubicación del Servicio</label>
-            <input
-              type="text"
-              id="serviceLocation"
-              value={formData.serviceLocation}
-              onChange={(e) => setFormData({ ...formData, serviceLocation: e.target.value })}
-              placeholder="Ej: Planta 1, Área X, Taller, etc."
-            />
+            <label htmlFor="locationId">Ubicación del Servicio</label>
+            <select
+              id="locationId"
+              value={formData.locationId}
+              onChange={(e) => setFormData({ ...formData, locationId: e.target.value })}
+            >
+              <option value="">Seleccionar ubicación</option>
+              {locations.map((loc) => (
+                <option key={loc.id} value={loc.id}>{loc.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="serviceTypeId">Tipo de Servicio</label>
+            <select
+              id="serviceTypeId"
+              value={formData.serviceTypeId}
+              onChange={(e) => setFormData({ ...formData, serviceTypeId: e.target.value })}
+            >
+              <option value="">Seleccionar tipo de servicio</option>
+              {serviceTypes.map((st) => (
+                <option key={st.id} value={st.id}>{st.name}</option>
+              ))}
+            </select>
+            <p style={{ marginTop: 4, marginBottom: 0, color: '#6e6b7b', fontSize: '0.85em' }}>
+              Al seleccionar un tipo, solo se listan los servicios de ese tipo.
+            </p>
           </div>
 
           <div className="form-group">
@@ -338,7 +371,8 @@ export default function WorkOrderNew() {
           <div className="form-group">
             <label>Servicios</label>
             <p style={{ marginTop: -4, marginBottom: 8, color: '#6e6b7b', fontSize: '0.9em' }}>
-              Agregue uno o más servicios. Para cada uno: seleccione el servicio, indique la cantidad de alojamientos y complete los datos (se abrirá la ventana automáticamente).
+              {formData.serviceTypeId ? 'Servicios del tipo seleccionado. ' : 'Seleccione primero un Tipo de Servicio para filtrar los servicios. '}
+              Agregue uno o más servicios. Para cada uno: seleccione el servicio, indique la cantidad de alojamientos y complete los datos.
             </p>
             {orderServices.map((os, idx) => (
               <div key={idx} className="service-row" style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 12, flexWrap: 'wrap' }}>
@@ -348,14 +382,15 @@ export default function WorkOrderNew() {
                     onChange={(val) => {
                       updateService(idx, 'serviceId', val);
                       if (val && !formData.title) {
-                        const svc = services.find(s => s.id === parseInt(val));
+                        const svc = servicesForOrder.find(s => s.id === parseInt(val));
                         if (svc) setFormData(prev => ({ ...prev, title: svc.name }));
                       }
                     }}
-                    options={services
+                    options={servicesForOrder
                       .filter(s => !orderServices.some((o, i) => i !== idx && o.serviceId === String(s.id)))
                       .map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
-                    placeholder="Seleccionar servicio..."
+                    placeholder={formData.serviceTypeId ? 'Seleccionar servicio...' : 'Seleccione primero un Tipo de Servicio'}
+                    disabled={!formData.serviceTypeId}
                   />
                 </div>
                 <div style={{ flex: '1 1 100px', minWidth: 100 }}>

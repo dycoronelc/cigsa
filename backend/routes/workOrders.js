@@ -273,6 +273,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
         eb.name as brand_name,
         eb.id as brand_id,
         em.id as model_id,
+        loc.name as location_name,
+        st.name as service_type_name,
         u.full_name as technician_name,
         u.phone as technician_phone,
         creator.full_name as created_by_name
@@ -281,6 +283,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
       LEFT JOIN equipment e ON wo.equipment_id = e.id
       LEFT JOIN equipment_models em ON e.model_id = em.id
       LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
+      LEFT JOIN locations loc ON wo.location_id = loc.id
+      LEFT JOIN service_types st ON wo.service_type_id = st.id
       LEFT JOIN users u ON wo.assigned_technician_id = u.id
       LEFT JOIN users creator ON wo.created_by = creator.id
       WHERE wo.id = ?
@@ -532,7 +536,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create work order
 router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'work_order'), async (req, res) => {
   try {
-    const { clientId, equipmentId, services, serviceLocation, clientServiceOrderNumber, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
+    const { clientId, equipmentId, services, serviceLocation, locationId, serviceTypeId, clientServiceOrderNumber, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
     
     if (!clientId || !equipmentId || !title) {
       return res.status(400).json({ error: 'Client, equipment, and title are required' });
@@ -546,6 +550,15 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
     
     const pool = await getConnection();
     
+    // Resolve service_location: use location name when locationId is set, else use provided text
+    let resolvedServiceLocation = serviceLocation || null;
+    const locId = locationId !== undefined && locationId !== null && locationId !== '' ? parseInt(locationId, 10) : null;
+    const stId = serviceTypeId !== undefined && serviceTypeId !== null && serviceTypeId !== '' ? parseInt(serviceTypeId, 10) : null;
+    if (locId) {
+      const [locRows] = await pool.query('SELECT name FROM locations WHERE id = ?', [locId]);
+      if (locRows.length > 0) resolvedServiceLocation = locRows[0].name;
+    }
+
     // Generate order number
     const [count] = await pool.query('SELECT COUNT(*) as count FROM work_orders');
     const nextNum = Number(count[0]?.count ?? 0) + 1;
@@ -555,7 +568,9 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
       orderNumber,
       clientId,
       equipmentId,
-      serviceLocation || null,
+      stId,
+      locId,
+      resolvedServiceLocation,
       clientServiceOrderNumber || null,
       totalHousingCount,
       assignedTechnicianId || null,
@@ -570,17 +585,25 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
     try {
       [result] = await pool.query(
         `INSERT INTO work_orders 
-         (order_number, client_id, equipment_id, service_location, client_service_order_number, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (order_number, client_id, equipment_id, service_type_id, location_id, service_location, client_service_order_number, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         woValues
       );
     } catch (woErr) {
-      if (woErr.code === 'ER_BAD_FIELD_ERROR' && woErr.sqlMessage && woErr.sqlMessage.includes('client_service_order_number')) {
+      if (woErr.code === 'ER_BAD_FIELD_ERROR' && woErr.sqlMessage && (woErr.sqlMessage.includes('service_type_id') || woErr.sqlMessage.includes('location_id'))) {
+        const legacyValues = [orderNumber, clientId, equipmentId, resolvedServiceLocation, clientServiceOrderNumber || null, totalHousingCount, assignedTechnicianId || null, title, description || null, priority || 'medium', scheduledDate || null, req.user.id, assignedTechnicianId ? 'assigned' : 'created'];
         [result] = await pool.query(
           `INSERT INTO work_orders 
-           (order_number, client_id, equipment_id, service_location, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [orderNumber, clientId, equipmentId, serviceLocation || null, totalHousingCount, assignedTechnicianId || null, title, description || null, priority || 'medium', scheduledDate || null, req.user.id, assignedTechnicianId ? 'assigned' : 'created']
+           (order_number, client_id, equipment_id, service_location, client_service_order_number, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          legacyValues
+        );
+      } else if (woErr.code === 'ER_BAD_FIELD_ERROR' && woErr.sqlMessage && woErr.sqlMessage.includes('client_service_order_number')) {
+        [result] = await pool.query(
+          `INSERT INTO work_orders 
+           (order_number, client_id, equipment_id, service_type_id, location_id, service_location, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [orderNumber, clientId, equipmentId, stId, locId, resolvedServiceLocation, totalHousingCount, assignedTechnicianId || null, title, description || null, priority || 'medium', scheduledDate || null, req.user.id, assignedTechnicianId ? 'assigned' : 'created']
         );
       } else {
         throw woErr;
@@ -653,7 +676,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
 // Update work order
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { title, description, priority, scheduledDate, assignedTechnicianId, status, serviceLocation, services, clientServiceOrderNumber, equipmentId } = req.body;
+    const { title, description, priority, scheduledDate, assignedTechnicianId, status, serviceLocation, locationId, serviceTypeId, services, clientServiceOrderNumber, equipmentId } = req.body;
     const pool = await getConnection();
     
     // Check permissions
@@ -769,7 +792,27 @@ router.put('/:id', authenticateToken, async (req, res) => {
       }
       }
     }
-    if (serviceLocation !== undefined) {
+    if (locationId !== undefined) {
+      const locId = locationId !== null && locationId !== '' ? parseInt(locationId, 10) : null;
+      updateFields.push('location_id = ?');
+      updateValues.push(locId);
+      if (locId) {
+        const [locRows] = await pool.query('SELECT name FROM locations WHERE id = ?', [locId]);
+        if (locRows.length > 0) {
+          updateFields.push('service_location = ?');
+          updateValues.push(locRows[0].name);
+        }
+      } else {
+        updateFields.push('service_location = ?');
+        updateValues.push(null);
+      }
+    }
+    if (serviceTypeId !== undefined) {
+      const stId = serviceTypeId !== null && serviceTypeId !== '' ? parseInt(serviceTypeId, 10) : null;
+      updateFields.push('service_type_id = ?');
+      updateValues.push(stId);
+    }
+    if (serviceLocation !== undefined && locationId === undefined) {
       updateFields.push('service_location = ?');
       updateValues.push(serviceLocation || null);
     }

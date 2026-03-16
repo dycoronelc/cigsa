@@ -5,21 +5,28 @@ import { activityLogger } from '../middleware/logger.js';
 
 const router = express.Router();
 
-// Get all services
+// Get all services (optional query: serviceTypeId to filter by type)
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    const { serviceTypeId } = req.query;
     const pool = await getConnection();
-    const [services] = await pool.query(
-      `
+    let sql = `
       SELECT 
         s.*,
-        sc.name AS category_name
+        sc.name AS category_name,
+        st.name AS service_type_name
       FROM services s
       LEFT JOIN service_categories sc ON s.category_id = sc.id
+      LEFT JOIN service_types st ON s.service_type_id = st.id
       WHERE s.is_active = TRUE
-      ORDER BY s.code
-      `
-    );
+    `;
+    const params = [];
+    if (serviceTypeId !== undefined && serviceTypeId !== '' && serviceTypeId !== null) {
+      sql += ' AND s.service_type_id = ?';
+      params.push(parseInt(serviceTypeId, 10));
+    }
+    sql += ' ORDER BY s.code';
+    const [services] = await pool.query(sql, params);
     res.json(services);
   } catch (error) {
     console.error('Get services error:', error);
@@ -35,9 +42,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
       `
       SELECT 
         s.*,
-        sc.name AS category_name
+        sc.name AS category_name,
+        st.name AS service_type_name
       FROM services s
       LEFT JOIN service_categories sc ON s.category_id = sc.id
+      LEFT JOIN service_types st ON s.service_type_id = st.id
       WHERE s.id = ?
       `,
       [req.params.id]
@@ -102,7 +111,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create service
 router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'service'), async (req, res) => {
   try {
-    const { code, name, description, categoryId, category, estimatedDuration, standardPrice } = req.body;
+    const { code, name, description, serviceTypeId, categoryId, category, estimatedDuration, standardPrice } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
@@ -113,6 +122,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
 
     const normalizedCategoryId = categoryId !== undefined && categoryId !== null && categoryId !== '' ? parseInt(categoryId) : null;
     const normalizedCategory = category !== undefined ? category : null;
+    const normalizedServiceTypeId = serviceTypeId !== undefined && serviceTypeId !== null && serviceTypeId !== '' ? parseInt(serviceTypeId) : null;
     let finalCode = typeof code === 'string' ? code.trim() : '';
 
     try {
@@ -143,15 +153,16 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
       const [result] = await conn.query(
         `
         INSERT INTO services (
-          code, name, description,
+          code, name, description, service_type_id,
           category_id, category,
           estimated_duration, standard_price
-        ) VALUES (?, ?, ?, ?, COALESCE(?, (SELECT name FROM service_categories WHERE id = ?)), ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, COALESCE(?, (SELECT name FROM service_categories WHERE id = ?)), ?, ?)
         `,
         [
           finalCode,
           name,
           description || null,
+          normalizedServiceTypeId,
           normalizedCategoryId,
           normalizedCategory || null,
           normalizedCategoryId,
@@ -181,7 +192,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
 // Update service
 router.put('/:id', authenticateToken, requireRole('admin'), activityLogger('UPDATE', 'service'), async (req, res) => {
   try {
-    const { code, name, description, categoryId, category, estimatedDuration, standardPrice, costPrice, laborCost, materialCost, isActive } = req.body;
+    const { code, name, description, serviceTypeId, categoryId, category, estimatedDuration, standardPrice, costPrice, laborCost, materialCost, isActive } = req.body;
     const pool = await getConnection();
 
     const updateFields = [];
@@ -198,6 +209,11 @@ router.put('/:id', authenticateToken, requireRole('admin'), activityLogger('UPDA
     if (description !== undefined) {
       updateFields.push('description = ?');
       updateValues.push(description);
+    }
+    if (serviceTypeId !== undefined) {
+      const normalized = serviceTypeId !== null && serviceTypeId !== '' ? parseInt(serviceTypeId) : null;
+      updateFields.push('service_type_id = ?');
+      updateValues.push(normalized);
     }
     if (categoryId !== undefined) {
       const normalizedCategoryId = categoryId !== null && categoryId !== '' ? parseInt(categoryId) : null;

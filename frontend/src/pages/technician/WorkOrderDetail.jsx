@@ -520,7 +520,11 @@ export default function TechnicianWorkOrderDetail() {
             </div>
             <div className="info-item">
               <label>Ubicación del Servicio</label>
-              <p>{order.service_location || 'No especificada'}</p>
+              <p>{order.location_name || order.service_location || 'No especificada'}</p>
+            </div>
+            <div className="info-item">
+              <label>Tipo de Servicio</label>
+              <p>{order.service_type_name || 'No especificado'}</p>
             </div>
             <div className="info-item">
               <label>N° Orden de Servicio del Cliente</label>

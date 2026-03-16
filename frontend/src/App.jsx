@@ -16,6 +16,8 @@ import Calendar from './pages/admin/Calendar';
 import ActivityLog from './pages/admin/ActivityLog';
 import ServiceDetail from './pages/admin/ServiceDetail';
 import ServiceCategories from './pages/admin/ServiceCategories';
+import ServiceTypes from './pages/admin/ServiceTypes';
+import Locations from './pages/admin/Locations';
 import TechnicianDashboard from './pages/technician/Dashboard';
 import TechnicianWorkOrders from './pages/technician/WorkOrders';
 import TechnicianWorkOrderDetail from './pages/technician/WorkOrderDetail';
@@ -68,6 +70,8 @@ function AppRoutes() {
           <Route path="/admin/activity-log" element={<ActivityLog />} />
           <Route path="/admin/services/:id" element={<ServiceDetail />} />
           <Route path="/admin/service-categories" element={<ServiceCategories />} />
+          <Route path="/admin/service-types" element={<ServiceTypes />} />
+          <Route path="/admin/locations" element={<Locations />} />
           <Route path="/login" element={<Navigate to="/admin/dashboard" />} />
           <Route path="*" element={<Navigate to="/admin/dashboard" />} />
         </Routes>

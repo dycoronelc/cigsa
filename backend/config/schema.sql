@@ -38,12 +38,31 @@ CREATE TABLE IF NOT EXISTS service_categories (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- Service Types table (Maestro de tipos de servicio: Reparación Integral, por Soldadura, por Mecanizado, Fabricación)
+CREATE TABLE IF NOT EXISTS service_types (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(100) UNIQUE NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Locations table (Maestro de ubicaciones para OT)
+CREATE TABLE IF NOT EXISTS locations (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(100) NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- Services table (servicios del taller)
 CREATE TABLE IF NOT EXISTS services (
   id INT PRIMARY KEY AUTO_INCREMENT,
   code VARCHAR(50) UNIQUE NOT NULL,
   name VARCHAR(100) NOT NULL,
   description TEXT,
+  service_type_id INT,
   category VARCHAR(50),
   category_id INT,
   estimated_duration INT COMMENT 'Duración estimada en horas',
@@ -54,6 +73,7 @@ CREATE TABLE IF NOT EXISTS services (
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (service_type_id) REFERENCES service_types(id) ON DELETE SET NULL,
   FOREIGN KEY (category_id) REFERENCES service_categories(id) ON DELETE SET NULL
 );
 
@@ -117,6 +137,8 @@ CREATE TABLE IF NOT EXISTS work_orders (
   client_id INT NOT NULL,
   equipment_id INT NOT NULL,
   service_id INT,
+  service_type_id INT,
+  location_id INT,
   service_location VARCHAR(100),
   client_service_order_number VARCHAR(50) COMMENT 'N° Orden de Servicio del Cliente',
   service_housing_count INT DEFAULT 0,
@@ -134,6 +156,8 @@ CREATE TABLE IF NOT EXISTS work_orders (
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
   FOREIGN KEY (equipment_id) REFERENCES equipment(id) ON DELETE CASCADE,
   FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE SET NULL,
+  FOREIGN KEY (service_type_id) REFERENCES service_types(id) ON DELETE SET NULL,
+  FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
 );

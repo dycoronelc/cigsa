@@ -10,6 +10,8 @@ import equipmentRoutes from './routes/equipment.js';
 import technicianRoutes from './routes/technicians.js';
 import serviceRoutes from './routes/services.js';
 import serviceCategoryRoutes from './routes/serviceCategories.js';
+import serviceTypeRoutes from './routes/serviceTypes.js';
+import locationRoutes from './routes/locations.js';
 import workOrderRoutes from './routes/workOrders.js';
 import dashboardRoutes from './routes/dashboard.js';
 import { initDatabase } from './config/database.js';
@@ -38,6 +40,8 @@ app.use('/api/equipment', equipmentRoutes);
 app.use('/api/technicians', technicianRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/service-categories', serviceCategoryRoutes);
+app.use('/api/service-types', serviceTypeRoutes);
+app.use('/api/locations', locationRoutes);
 app.use('/api/work-orders', workOrderRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 

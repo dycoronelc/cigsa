@@ -199,6 +199,106 @@ export const initDatabase = async () => {
       }
     }
 
+    // Ensure service_types table exists and seed default types
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS service_types (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          name VARCHAR(100) UNIQUE NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+      `);
+      const defaultServiceTypes = [
+        'Reparación Integral',
+        'Reparación por Soldadura',
+        'Reparación por Mecanizado',
+        'Fabricación'
+      ];
+      for (const name of defaultServiceTypes) {
+        await pool.query('INSERT IGNORE INTO service_types (name) VALUES (?)', [name]);
+      }
+    } catch (error) {
+      console.error('Error ensuring service_types table:', error.message);
+    }
+
+    // Ensure locations table exists
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS locations (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          name VARCHAR(100) NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+      `);
+    } catch (error) {
+      console.error('Error ensuring locations table:', error.message);
+    }
+
+    // Add service_type_id to services if it doesn't exist
+    try {
+      const [cols] = await pool.query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'services' AND COLUMN_NAME = 'service_type_id'
+      `, [process.env.DB_NAME || 'cigsa_db']);
+      if (cols.length === 0) {
+        await pool.query('ALTER TABLE services ADD COLUMN service_type_id INT NULL AFTER description');
+        try {
+          await pool.query('ALTER TABLE services ADD CONSTRAINT services_fk_service_type FOREIGN KEY (service_type_id) REFERENCES service_types(id) ON DELETE SET NULL');
+        } catch (fkErr) {
+          if (!fkErr.sqlMessage?.includes('Duplicate')) console.warn('FK service_type_id:', fkErr.message);
+        }
+        console.log('Added service_type_id column to services table');
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error adding service_type_id to services:', error.message);
+      }
+    }
+
+    // Add service_type_id and location_id to work_orders if they don't exist
+    try {
+      const [cols] = await pool.query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_orders' AND COLUMN_NAME = 'service_type_id'
+      `, [process.env.DB_NAME || 'cigsa_db']);
+      if (cols.length === 0) {
+        await pool.query('ALTER TABLE work_orders ADD COLUMN service_type_id INT NULL AFTER service_id');
+        try {
+          await pool.query('ALTER TABLE work_orders ADD CONSTRAINT wo_fk_service_type FOREIGN KEY (service_type_id) REFERENCES service_types(id) ON DELETE SET NULL');
+        } catch (fkErr) {
+          if (!fkErr.sqlMessage?.includes('Duplicate')) console.warn('FK work_orders.service_type_id:', fkErr.message);
+        }
+        console.log('Added service_type_id column to work_orders table');
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error adding service_type_id to work_orders:', error.message);
+      }
+    }
+    try {
+      const [cols] = await pool.query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_orders' AND COLUMN_NAME = 'location_id'
+      `, [process.env.DB_NAME || 'cigsa_db']);
+      if (cols.length === 0) {
+        await pool.query('ALTER TABLE work_orders ADD COLUMN location_id INT NULL AFTER service_type_id');
+        try {
+          await pool.query('ALTER TABLE work_orders ADD CONSTRAINT wo_fk_location FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE SET NULL');
+        } catch (fkErr) {
+          if (!fkErr.sqlMessage?.includes('Duplicate')) console.warn('FK work_orders.location_id:', fkErr.message);
+        }
+        console.log('Added location_id column to work_orders table');
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error adding location_id to work_orders:', error.message);
+      }
+    }
+
     // Ensure work_order_services table exists (múltiples servicios por OT)
     try {
       await pool.query(`

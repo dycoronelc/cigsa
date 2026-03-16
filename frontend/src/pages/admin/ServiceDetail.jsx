@@ -11,6 +11,7 @@ export default function ServiceDetail() {
   const { alertDialog, showError, showSuccess, closeAlert } = useAlert();
   const [service, setService] = useState(null);
   const [categories, setCategories] = useState([]);
+  const [serviceTypes, setServiceTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('general');
   const [isEditing, setIsEditing] = useState(false);
@@ -18,6 +19,7 @@ export default function ServiceDetail() {
     code: '',
     name: '',
     description: '',
+    serviceTypeId: '',
     categoryId: '',
     estimatedDuration: '',
     standardPrice: '',
@@ -29,6 +31,7 @@ export default function ServiceDetail() {
   useEffect(() => {
     fetchService();
     fetchCategories();
+    fetchServiceTypes();
   }, [id]);
 
   const fetchCategories = async () => {
@@ -37,6 +40,15 @@ export default function ServiceDetail() {
       setCategories(res.data);
     } catch (error) {
       console.error('Error fetching categories:', error);
+    }
+  };
+
+  const fetchServiceTypes = async () => {
+    try {
+      const res = await api.get('/service-types');
+      setServiceTypes(res.data);
+    } catch (error) {
+      console.error('Error fetching service types:', error);
     }
   };
 
@@ -49,6 +61,7 @@ export default function ServiceDetail() {
         code: serviceData.code || '',
         name: serviceData.name || '',
         description: serviceData.description || '',
+        serviceTypeId: serviceData.service_type_id ? String(serviceData.service_type_id) : '',
         categoryId: serviceData.category_id ? String(serviceData.category_id) : '',
         estimatedDuration: serviceData.estimated_duration || '',
         standardPrice: serviceData.standard_price || '',
@@ -68,6 +81,7 @@ export default function ServiceDetail() {
     try {
       const data = {
         ...formData,
+        serviceTypeId: formData.serviceTypeId ? parseInt(formData.serviceTypeId) : null,
         categoryId: formData.categoryId ? parseInt(formData.categoryId) : null,
         estimatedDuration: formData.estimatedDuration ? parseInt(formData.estimatedDuration) : null,
         standardPrice: formData.standardPrice ? parseFloat(formData.standardPrice) : null,
@@ -93,6 +107,7 @@ export default function ServiceDetail() {
         code: service.code || '',
         name: service.name || '',
         description: service.description || '',
+        serviceTypeId: service.service_type_id ? String(service.service_type_id) : '',
         categoryId: service.category_id ? String(service.category_id) : '',
         estimatedDuration: service.estimated_duration || '',
         standardPrice: service.standard_price || '',
@@ -203,6 +218,19 @@ export default function ServiceDetail() {
                   />
                 </div>
                 <div className="form-group">
+                  <label>Tipo de Servicio</label>
+                  <select
+                    value={formData.serviceTypeId}
+                    onChange={(e) => setFormData({ ...formData, serviceTypeId: e.target.value })}
+                    className="form-input"
+                  >
+                    <option value="">Sin tipo</option>
+                    {serviceTypes.map((st) => (
+                      <option key={st.id} value={st.id}>{st.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
                   <label>Categoría</label>
                   <select
                     value={formData.categoryId}
@@ -252,6 +280,10 @@ export default function ServiceDetail() {
                 <div className="info-item">
                   <label>Nombre</label>
                   <p>{service.name}</p>
+                </div>
+                <div className="info-item">
+                  <label>Tipo de Servicio</label>
+                  <p>{service.service_type_name || 'Sin tipo'}</p>
                 </div>
                 <div className="info-item">
                   <label>Categoría</label>
