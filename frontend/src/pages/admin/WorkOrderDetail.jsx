@@ -26,6 +26,8 @@ export default function WorkOrderDetail() {
     priority: 'medium',
     scheduledDate: '',
     assignedTechnicianId: '',
+    startDate: '',
+    completionDate: '',
     services: [],
     description: ''
   });
@@ -139,9 +141,20 @@ export default function WorkOrderDetail() {
     if (!value) return '';
     try {
       if (typeof value === 'string') return value.split('T')[0];
-      // fallback
       const d = new Date(value);
       return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+    } catch (_) {
+      return '';
+    }
+  };
+
+  const toDateTimeLocalValue = (value) => {
+    if (!value) return '';
+    try {
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return '';
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     } catch (_) {
       return '';
     }
@@ -159,6 +172,8 @@ export default function WorkOrderDetail() {
       priority: order.priority || 'medium',
       scheduledDate: toDateInputValue(order.scheduled_date),
       assignedTechnicianId: order.assigned_technician_id ? String(order.assigned_technician_id) : '',
+      startDate: toDateTimeLocalValue(order.start_date),
+      completionDate: toDateTimeLocalValue(order.completion_date),
       services: orderServicesList.length > 0
         ? orderServicesList.map(s => ({
             serviceId: String(s.service_id),
@@ -311,6 +326,11 @@ export default function WorkOrderDetail() {
     if (editData.assignedTechnicianId !== currentAssigned) {
       payload.assignedTechnicianId = editData.assignedTechnicianId ? parseInt(editData.assignedTechnicianId) : null;
     }
+
+    const currentStartDate = toDateTimeLocalValue(order.start_date);
+    if (editData.startDate !== currentStartDate) payload.startDate = editData.startDate || null;
+    const currentCompletionDate = toDateTimeLocalValue(order.completion_date);
+    if (editData.completionDate !== currentCompletionDate) payload.completionDate = editData.completionDate || null;
 
     const currentServices = (order.services || []).map(s => ({
       serviceId: String(s.service_id),
@@ -791,16 +811,32 @@ export default function WorkOrderDetail() {
 
               <div className="info-item">
                 <label>Fecha de Inicio</label>
-                <p>{order.start_date 
-                  ? new Date(order.start_date).toLocaleString('es-PA')
-                  : 'No iniciada'}</p>
+                {editMode ? (
+                  <input
+                    type="datetime-local"
+                    value={editData.startDate}
+                    onChange={(e) => setEditData({ ...editData, startDate: e.target.value })}
+                  />
+                ) : (
+                  <p>{order.start_date 
+                    ? new Date(order.start_date).toLocaleString('es-PA')
+                    : 'No iniciada'}</p>
+                )}
               </div>
 
               <div className="info-item">
                 <label>Fecha de Completación</label>
-                <p>{order.completion_date 
-                  ? new Date(order.completion_date).toLocaleString('es-PA')
-                  : 'No completada'}</p>
+                {editMode ? (
+                  <input
+                    type="datetime-local"
+                    value={editData.completionDate}
+                    onChange={(e) => setEditData({ ...editData, completionDate: e.target.value })}
+                  />
+                ) : (
+                  <p>{order.completion_date 
+                    ? new Date(order.completion_date).toLocaleString('es-PA')
+                    : 'No completada'}</p>
+                )}
               </div>
 
               {workingDays !== null && (
@@ -822,6 +858,7 @@ export default function WorkOrderDetail() {
               <label>Descripción</label>
               {editMode ? (
                 <textarea
+                  className="description-full-width"
                   value={editData.description}
                   onChange={(e) => setEditData({ ...editData, description: e.target.value })}
                   rows={4}

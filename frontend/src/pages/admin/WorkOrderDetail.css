@@ -100,6 +100,8 @@
 
 .description-section {
   margin-top: 2rem;
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .description-section label {
@@ -108,6 +110,13 @@
   font-size: 0.875rem;
   display: block;
   margin-bottom: 0.5rem;
+}
+
+.description-section .description-full-width,
+.description-section textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .measurements-section h2 {

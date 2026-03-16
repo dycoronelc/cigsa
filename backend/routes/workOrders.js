@@ -676,7 +676,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
 // Update work order
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { title, description, priority, scheduledDate, assignedTechnicianId, status, serviceLocation, locationId, serviceTypeId, services, clientServiceOrderNumber, equipmentId } = req.body;
+    const { title, description, priority, scheduledDate, assignedTechnicianId, status, serviceLocation, locationId, serviceTypeId, services, clientServiceOrderNumber, equipmentId, startDate, completionDate } = req.body;
     const pool = await getConnection();
     
     // Check permissions
@@ -839,6 +839,24 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (scheduledDate !== undefined) {
       updateFields.push('scheduled_date = ?');
       updateValues.push(scheduledDate);
+    }
+    if (startDate !== undefined) {
+      let startVal = null;
+      if (startDate) {
+        const s = startDate.replace('T', ' ');
+        startVal = s.length === 16 ? `${s}:00` : s;
+      }
+      updateFields.push('start_date = ?');
+      updateValues.push(startVal);
+    }
+    if (completionDate !== undefined) {
+      let endVal = null;
+      if (completionDate) {
+        const s = completionDate.replace('T', ' ');
+        endVal = s.length === 16 ? `${s}:00` : s;
+      }
+      updateFields.push('completion_date = ?');
+      updateValues.push(endVal);
     }
     if (assignedTechnicianId !== undefined) {
       updateFields.push('assigned_technician_id = ?');
