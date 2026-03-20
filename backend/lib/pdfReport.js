@@ -123,7 +123,7 @@ function formatDateTime(d) {
 }
 
 function getReportDate(order) {
-  const d = order.scheduled_date || order.created_at || new Date();
+  const d = order.completion_date || order.scheduled_date || order.created_at || new Date();
   const date = typeof d === 'string' ? new Date(d) : d;
   if (isNaN(date.getTime())) return { day: '-', month: '-', year: '-' };
   return {
@@ -131,6 +131,14 @@ function getReportDate(order) {
     month: String(date.getMonth() + 1).padStart(2, '0'),
     year: String(date.getFullYear())
   };
+}
+
+/** Ruta absoluta imagen firma superintendente adjunta por admin */
+function getSuperintendentSignatureFilePath(order) {
+  const fp = (order.superintendent_signature_path || '').trim();
+  const name = path.basename(fp.replace(/^\/+/, ''));
+  if (!name) return null;
+  return path.join(__dirname, '..', 'uploads', 'signatures', name);
 }
 
 /** Dibuja el pie de página con datos de contacto (en la página actual, al final). */
@@ -211,7 +219,7 @@ export async function generateWorkOrderReport(orderData) {
     y += 22;
 
     doc.font('Helvetica').fontSize(10);
-    doc.text(`Fecha: ${formatDate(order.scheduled_date || order.created_at)}`, MARGIN, y);
+    doc.text(`Fecha: ${formatDate(order.completion_date || order.scheduled_date || order.created_at)}`, MARGIN, y);
     doc.text(`Cliente: ${order.client_name || '-'}${order.company_name ? ' - ' + order.company_name : ''}`, MARGIN + 200, y);
     y += 16;
     doc.text(`N° Orden de Servicio del Cliente: ${order.client_service_order_number || '-'}`, MARGIN, y);
@@ -283,34 +291,46 @@ export async function generateWorkOrderReport(orderData) {
       y += 30;
     }
 
-    // Firma del Superintendente al final de la página 1 (descripción de servicios)
+    // Firma del Superintendente (solo si hay imagen adjunta o firma legacy en BD)
     const conformitySuperintendente = order.conformity_signature_superintendente || null;
-    const signatureBlockHeight = 100;
-    y = ensureSpace(doc, reportDate, y, signatureBlockHeight);
-    doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Firma del Superintendente', MARGIN, y);
-    y += 18;
-    if (conformitySuperintendente && conformitySuperintendente.signature_data) {
-      const sigBuf = signatureDataToBuffer(conformitySuperintendente.signature_data);
-      if (sigBuf) {
+    const supFilePath = getSuperintendentSignatureFilePath(order);
+    const hasSupFile = supFilePath && fs.existsSync(supFilePath);
+    const supLegacyBuf = conformitySuperintendente?.signature_data
+      ? signatureDataToBuffer(conformitySuperintendente.signature_data)
+      : null;
+    if (hasSupFile || supLegacyBuf) {
+      const signatureBlockHeight = 100;
+      y = ensureSpace(doc, reportDate, y, signatureBlockHeight);
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Firma del Superintendente', MARGIN, y);
+      y += 18;
+      if (hasSupFile) {
         try {
-          doc.image(sigBuf, MARGIN, y, { width: 180, height: 60, fit: [180, 60] });
+          doc.image(supFilePath, MARGIN, y, { width: 180, height: 60, fit: [180, 60] });
           y += 62;
         } catch (_) {
           doc.font('Helvetica').fontSize(9).fillColor('#555').text('(Imagen de firma no disponible)', MARGIN, y);
           y += 16;
         }
-      } else {
-        doc.font('Helvetica').fontSize(9).fillColor('#555').text('(Firma no disponible)', MARGIN, y);
-        y += 16;
+        doc.font('Helvetica').fontSize(10).fillColor('black');
+        const supName = order.superintendent_signature_signed_by || '-';
+        doc.text(`Nombre: ${supName}`, MARGIN, y);
+        y += 14;
+        doc.text(`Fecha: ${formatDateTime(order.superintendent_signature_signed_at)}`, MARGIN, y);
+        y += 22;
+      } else if (supLegacyBuf) {
+        try {
+          doc.image(supLegacyBuf, MARGIN, y, { width: 180, height: 60, fit: [180, 60] });
+          y += 62;
+        } catch (_) {
+          doc.font('Helvetica').fontSize(9).fillColor('#555').text('(Imagen de firma no disponible)', MARGIN, y);
+          y += 16;
+        }
+        doc.font('Helvetica').fontSize(10).fillColor('black');
+        doc.text(`Nombre: ${conformitySuperintendente.signed_by_name || '-'}`, MARGIN, y);
+        y += 14;
+        doc.text(`Fecha: ${formatDateTime(conformitySuperintendente.signed_at)}`, MARGIN, y);
+        y += 22;
       }
-      doc.font('Helvetica').fontSize(10).fillColor('black');
-      doc.text(`Nombre: ${conformitySuperintendente.signed_by_name || '-'}`, MARGIN, y);
-      y += 14;
-      doc.text(`Fecha: ${formatDateTime(conformitySuperintendente.signed_at)}`, MARGIN, y);
-      y += 22;
-    } else {
-      doc.font('Helvetica').fontSize(9).fillColor('#555').text('Sin firma registrada.', MARGIN, y);
-      y += 24;
     }
 
     doc.addPage();

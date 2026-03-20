@@ -299,6 +299,35 @@ export const initDatabase = async () => {
       }
     }
 
+    const addWoColIfMissing = async (colName, sqlAlter) => {
+      try {
+        const [cols] = await pool.query(
+          `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_orders' AND COLUMN_NAME = ?`,
+          [process.env.DB_NAME || 'cigsa_db', colName]
+        );
+        if (cols.length === 0) {
+          await pool.query(sqlAlter);
+          console.log(`Added ${colName} column to work_orders table`);
+        }
+      } catch (e) {
+        if (!e.sqlMessage?.includes('Duplicate') && !e.sqlMessage?.includes('already exists')) {
+          console.error(`Error adding ${colName} to work_orders:`, e.message);
+        }
+      }
+    };
+    await addWoColIfMissing(
+      'superintendent_signature_path',
+      "ALTER TABLE work_orders ADD COLUMN superintendent_signature_path VARCHAR(500) NULL COMMENT 'Imagen firma superintendente' AFTER completion_date"
+    );
+    await addWoColIfMissing(
+      'superintendent_signature_signed_by',
+      'ALTER TABLE work_orders ADD COLUMN superintendent_signature_signed_by VARCHAR(200) NULL AFTER superintendent_signature_path'
+    );
+    await addWoColIfMissing(
+      'superintendent_signature_signed_at',
+      'ALTER TABLE work_orders ADD COLUMN superintendent_signature_signed_at DATETIME NULL AFTER superintendent_signature_signed_by'
+    );
+
     // Ensure work_order_services table exists (múltiples servicios por OT)
     try {
       await pool.query(`

@@ -44,6 +44,8 @@ export default function WorkOrderDetail() {
   const [editingMeasurement, setEditingMeasurement] = useState(null);
   const [editMeasurementForm, setEditMeasurementForm] = useState({ notes: '', housingMeasurements: [] });
   const [savingMeasurement, setSavingMeasurement] = useState(false);
+  const [superintendentSigSignedBy, setSuperintendentSigSignedBy] = useState('');
+  const [superintendentSigUploading, setSuperintendentSigUploading] = useState(false);
 
   const isDocVisibleToTechnician = (d) => {
     const v = d?.is_visible_to_technician;
@@ -192,9 +194,15 @@ export default function WorkOrderDetail() {
     setEditMode(true);
   };
 
-  const servicesForOrder = editData.serviceTypeId
-    ? services.filter((s) => String(s.service_type_id) === String(editData.serviceTypeId))
-    : services;
+  const selectedServiceIds = new Set(
+    (editData.services || []).filter((os) => os.serviceId).map((os) => String(os.serviceId))
+  );
+  const servicesForOrder = services.filter(
+    (s) =>
+      !editData.serviceTypeId ||
+      String(s.service_type_id) === String(editData.serviceTypeId) ||
+      selectedServiceIds.has(String(s.id))
+  );
 
   const cancelEdit = () => {
     setEditMode(false);
@@ -546,6 +554,12 @@ export default function WorkOrderDetail() {
           Documentos
         </button>
         <button
+          className={activeTab === 'firma' ? 'active' : ''}
+          onClick={() => setActiveTab('firma')}
+        >
+          Firma
+        </button>
+        <button
           className={activeTab === 'bitacora' ? 'active' : ''}
           onClick={() => setActiveTab('bitacora')}
         >
@@ -727,8 +741,7 @@ export default function WorkOrderDetail() {
                             options={servicesForOrder
                               .filter(s => !(editData.services || []).some((o, i) => i !== idx && o.serviceId === String(s.id)))
                               .map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
-                            placeholder={editData.serviceTypeId ? 'Seleccionar servicio...' : 'Seleccione Tipo de Servicio'}
-                            disabled={!editData.serviceTypeId}
+                            placeholder="Seleccionar servicio..."
                           />
                         </div>
                         <div style={{ flex: '1 1 100px', minWidth: 100 }}>
@@ -1177,6 +1190,99 @@ export default function WorkOrderDetail() {
             ) : (
               <p className="empty-message">No hay documentos</p>
             )}
+          </div>
+        )}
+
+        {activeTab === 'firma' && order && (
+          <div className="firma-section" style={{ maxWidth: 640 }}>
+            <h3>Firma del Superintendente</h3>
+            <p style={{ color: 'var(--text-light)', fontSize: 14, marginBottom: 16, lineHeight: 1.5 }}>
+              Adjunte aquí la imagen de la firma del superintendente (por ejemplo, la recibida por correo). Solo aparecerá en el reporte PDF cuando exista una imagen cargada.
+            </p>
+            {order.superintendent_signature_path ? (
+              <div style={{ marginBottom: 20 }}>
+                <img
+                  src={getStaticUrl(order.superintendent_signature_path)}
+                  alt="Firma del superintendente"
+                  style={{ maxWidth: '100%', maxHeight: 220, border: '1px solid var(--border)', borderRadius: 8, background: '#fff' }}
+                />
+                {order.superintendent_signature_signed_by && (
+                  <p style={{ marginTop: 8, marginBottom: 0 }}>
+                    <strong>Nombre:</strong> {order.superintendent_signature_signed_by}
+                  </p>
+                )}
+                {order.superintendent_signature_signed_at && (
+                  <p style={{ marginTop: 4, marginBottom: 0, color: 'var(--text-light)', fontSize: 14 }}>
+                    {new Date(order.superintendent_signature_signed_at).toLocaleString('es-PA')}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="empty-message" style={{ marginBottom: 16 }}>Aún no hay imagen adjunta.</p>
+            )}
+            <div className="form-group" style={{ marginBottom: 12 }}>
+              <label>Nombre en el reporte (opcional)</label>
+              <input
+                type="text"
+                value={superintendentSigSignedBy}
+                onChange={(e) => setSuperintendentSigSignedBy(e.target.value)}
+                placeholder="Ej: nombre del superintendente"
+                style={{ width: '100%', maxWidth: 400, padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)' }}
+              />
+            </div>
+            <input type="file" accept="image/*" id="superintendent-sig-file" style={{ marginBottom: 12, display: 'block' }} />
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={superintendentSigUploading}
+                onClick={async () => {
+                  const input = document.getElementById('superintendent-sig-file');
+                  const file = input?.files?.[0];
+                  if (!file) {
+                    showError('Seleccione un archivo de imagen');
+                    return;
+                  }
+                  setSuperintendentSigUploading(true);
+                  try {
+                    const fd = new FormData();
+                    fd.append('superintendent_signature', file);
+                    if (superintendentSigSignedBy.trim()) fd.append('signedBy', superintendentSigSignedBy.trim());
+                    await api.post(`/work-orders/${id}/superintendent-signature`, fd, {
+                      headers: { 'Content-Type': 'multipart/form-data' }
+                    });
+                    showSuccess('Firma del superintendente guardada');
+                    fetchOrder();
+                    if (input) input.value = '';
+                  } catch (e) {
+                    showError(e.response?.data?.error || 'Error al subir la imagen');
+                  } finally {
+                    setSuperintendentSigUploading(false);
+                  }
+                }}
+              >
+                {superintendentSigUploading ? 'Subiendo...' : order.superintendent_signature_path ? 'Reemplazar imagen' : 'Subir imagen'}
+              </button>
+              {order.superintendent_signature_path && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    showConfirm('¿Eliminar la imagen de firma del superintendente?', async () => {
+                      try {
+                        await api.delete(`/work-orders/${id}/superintendent-signature`);
+                        showSuccess('Imagen eliminada');
+                        fetchOrder();
+                      } catch (e) {
+                        showError(e.response?.data?.error || 'Error al eliminar');
+                      }
+                    });
+                  }}
+                >
+                  Eliminar imagen
+                </button>
+              )}
+            </div>
           </div>
         )}
 

@@ -67,15 +67,12 @@ export default function TechnicianWorkOrderDetail() {
   const [expandedPhoto, setExpandedPhoto] = useState(null);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [signatureDataCapataz, setSignatureDataCapataz] = useState({ signedBy: '' });
-  const [signatureDataSuperintendente, setSignatureDataSuperintendente] = useState({ signedBy: '' });
   const [existingSignatureCapataz, setExistingSignatureCapataz] = useState(null);
-  const [existingSignatureSuperintendente, setExistingSignatureSuperintendente] = useState(null);
   const [activityLog, setActivityLog] = useState([]);
   const [loadingActivity, setLoadingActivity] = useState(false);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
   const signatureCanvasRefCapataz = useRef(null);
-  const signatureCanvasRefSuperintendente = useRef(null);
   const activeSignatureCanvasRef = useRef(null);
 
   const isDocVisibleToTechnician = (d) => {
@@ -157,28 +154,23 @@ export default function TechnicianWorkOrderDetail() {
 
   const openSignatureModal = async () => {
     setSignatureDataCapataz({ signedBy: '' });
-    setSignatureDataSuperintendente({ signedBy: '' });
     setExistingSignatureCapataz(null);
-    setExistingSignatureSuperintendente(null);
     setShowSignatureModal(true);
     try {
       const res = await api.get(`/work-orders/${id}/conformity-signature`);
       const data = res.data || {};
       if (data.capataz) setExistingSignatureCapataz(data.capataz);
-      if (data.superintendente) setExistingSignatureSuperintendente(data.superintendente);
     } catch (e) {
       setExistingSignatureCapataz(null);
-      setExistingSignatureSuperintendente(null);
     }
     setTimeout(() => {
-      [signatureCanvasRefCapataz.current, signatureCanvasRefSuperintendente.current].forEach((canvas) => {
-        if (canvas) {
-          const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.strokeStyle = '#000';
-          ctx.lineWidth = 2;
-        }
-      });
+      const canvas = signatureCanvasRefCapataz.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+      }
     }, 100);
   };
 
@@ -229,14 +221,6 @@ export default function TechnicianWorkOrderDetail() {
     }
   };
 
-  const clearSignatureSuperintendente = () => {
-    const canvas = signatureCanvasRefSuperintendente.current;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
-  };
-
   const submitConformitySignatureCapataz = async () => {
     if (!signatureDataCapataz.signedBy || !signatureDataCapataz.signedBy.trim()) {
       showError('Indique el nombre del capataz');
@@ -257,33 +241,6 @@ export default function TechnicianWorkOrderDetail() {
       });
       showSuccess('Firma del capataz registrada');
       setExistingSignatureCapataz({ signature_data: dataUrl, signed_by_name: signatureDataCapataz.signedBy.trim(), signed_at: new Date().toISOString() });
-      fetchOrder();
-      if (activeTab === 'bitacora') fetchActivity();
-    } catch (error) {
-      showError(error.response?.data?.error || 'Error al guardar la firma');
-    }
-  };
-
-  const submitConformitySignatureSuperintendente = async () => {
-    if (!signatureDataSuperintendente.signedBy || !signatureDataSuperintendente.signedBy.trim()) {
-      showError('Indique el nombre del superintendente');
-      return;
-    }
-    const canvas = signatureCanvasRefSuperintendente.current;
-    if (!canvas) return;
-    const dataUrl = canvas.toDataURL('image/png');
-    if (!dataUrl || dataUrl.length < 100) {
-      showError('Capture la firma del superintendente en el recuadro');
-      return;
-    }
-    try {
-      await api.post(`/work-orders/${id}/conformity-signature`, {
-        signatureData: dataUrl,
-        signedBy: signatureDataSuperintendente.signedBy.trim(),
-        role: 'superintendente'
-      });
-      showSuccess('Firma del superintendente registrada');
-      setExistingSignatureSuperintendente({ signature_data: dataUrl, signed_by_name: signatureDataSuperintendente.signedBy.trim(), signed_at: new Date().toISOString() });
       fetchOrder();
       if (activeTab === 'bitacora') fetchActivity();
     } catch (error) {
@@ -471,17 +428,11 @@ export default function TechnicianWorkOrderDetail() {
           <option value="cancelled">Cancelada</option>
         </select>
         <button type="button" className="btn-primary" onClick={openSignatureModal} style={{ marginLeft: 8 }}>
-          Firmas de conformidad
+          Firma del capataz
         </button>
-        {(order.conformity_signature_capataz || order.conformity_signature_superintendente) && (
+        {order.conformity_signature_capataz && (
           <span style={{ fontSize: 13, color: 'var(--text-light)' }}>
-            {order.conformity_signature_capataz && (
-              <>Capataz: {order.conformity_signature_capataz.signed_by_name}</>
-            )}
-            {order.conformity_signature_capataz && order.conformity_signature_superintendente && ' · '}
-            {order.conformity_signature_superintendente && (
-              <>Superintendente: {order.conformity_signature_superintendente.signed_by_name}</>
-            )}
+            Capataz: {order.conformity_signature_capataz.signed_by_name}
           </span>
         )}
       </div>
@@ -916,12 +867,12 @@ export default function TechnicianWorkOrderDetail() {
       {showSignatureModal && (
         <div className="modal-overlay" onClick={() => setShowSignatureModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
-            <h2>Firmas de conformidad</h2>
+            <h2>Firma de conformidad (Capataz)</h2>
             <p style={{ marginTop: -8, marginBottom: 16, color: 'var(--text-light)', fontSize: 14 }}>
-              Registre la firma del Capataz y del Superintendente, cada una con su nombre.
+              Registre la firma del capataz que recibe el trabajo. La firma del superintendente la adjunta administración en la pestaña Firma de la OT.
             </p>
 
-            <div style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--border)' }}>
+            <div>
               <h3 style={{ fontSize: 15, marginBottom: 12 }}>Firma del Capataz</h3>
               {existingSignatureCapataz?.signature_data ? (
                 <div style={{ marginBottom: 12 }}>
@@ -966,54 +917,6 @@ export default function TechnicianWorkOrderDetail() {
               </div>
               <button type="button" className="btn-primary" onClick={submitConformitySignatureCapataz} style={{ marginTop: 8 }}>
                 Guardar firma del capataz
-              </button>
-            </div>
-
-            <div>
-              <h3 style={{ fontSize: 15, marginBottom: 12 }}>Firma del Superintendente</h3>
-              {existingSignatureSuperintendente?.signature_data ? (
-                <div style={{ marginBottom: 12 }}>
-                  <img
-                    src={existingSignatureSuperintendente.signature_data}
-                    alt="Firma superintendente"
-                    style={{ maxWidth: '100%', height: 'auto', border: '1px solid #ddd', borderRadius: 6, background: '#fff' }}
-                  />
-                  <p style={{ marginTop: 6, color: 'var(--text-light)', fontSize: 13 }}>
-                    Firmado por <strong>{existingSignatureSuperintendente.signed_by_name}</strong> el {new Date(existingSignatureSuperintendente.signed_at).toLocaleString('es-PA')}
-                  </p>
-                  <p style={{ marginTop: 4, fontSize: 12, color: 'var(--text-light)' }}>Puede registrar una nueva firma a continuación.</p>
-                </div>
-              ) : null}
-              <div className="form-group" style={{ marginBottom: 8 }}>
-                <label>Nombre del superintendente *</label>
-                <input
-                  type="text"
-                  value={signatureDataSuperintendente.signedBy}
-                  onChange={(e) => setSignatureDataSuperintendente((s) => ({ ...s, signedBy: e.target.value }))}
-                  placeholder="Ej: María López"
-                />
-              </div>
-              <div className="form-group">
-                <label>Firma</label>
-                <canvas
-                  ref={signatureCanvasRefSuperintendente}
-                  width={400}
-                  height={140}
-                  style={{ border: '1px solid #ccc', borderRadius: 6, touchAction: 'none', width: '100%', maxWidth: 400, height: 140 }}
-                  onMouseDown={handleSignatureStart}
-                  onMouseMove={handleSignatureMove}
-                  onMouseUp={handleSignatureEnd}
-                  onMouseLeave={handleSignatureEnd}
-                  onTouchStart={(e) => { e.preventDefault(); handleSignatureStart(e); }}
-                  onTouchMove={(e) => { e.preventDefault(); handleSignatureMove(e); }}
-                  onTouchEnd={(e) => { e.preventDefault(); handleSignatureEnd(); }}
-                />
-                <button type="button" className="btn-secondary" onClick={clearSignatureSuperintendente} style={{ marginTop: 6 }}>
-                  Limpiar firma
-                </button>
-              </div>
-              <button type="button" className="btn-primary" onClick={submitConformitySignatureSuperintendente} style={{ marginTop: 8 }}>
-                Guardar firma del superintendente
               </button>
             </div>
 

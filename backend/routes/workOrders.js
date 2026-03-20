@@ -15,9 +15,19 @@ const router = express.Router();
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadPath = file.fieldname === 'document' 
-      ? path.join(__dirname, '..', 'uploads', 'documents')
-      : path.join(__dirname, '..', 'uploads', 'photos');
+    let uploadPath;
+    if (file.fieldname === 'document') {
+      uploadPath = path.join(__dirname, '..', 'uploads', 'documents');
+    } else if (file.fieldname === 'superintendent_signature') {
+      uploadPath = path.join(__dirname, '..', 'uploads', 'signatures');
+    } else {
+      uploadPath = path.join(__dirname, '..', 'uploads', 'photos');
+    }
+    try {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    } catch (_) {
+      /* ignore */
+    }
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
@@ -1223,13 +1233,73 @@ router.get('/:id/activity', authenticateToken, async (req, res) => {
   }
 });
 
-// Firma de conformidad (Capataz o Superintendente)
+// Imagen de firma del superintendente (solo admin; adjunta por correo u otro medio)
+router.post('/:id/superintendent-signature', authenticateToken, requireRole('admin'), upload.single('superintendent_signature'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Seleccione un archivo de imagen' });
+    }
+    const signedBy = (req.body.signedBy && String(req.body.signedBy).trim()) || null;
+    const pool = await getConnection();
+    const [orders] = await pool.query('SELECT id, superintendent_signature_path FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) return res.status(404).json({ error: 'Work order not found' });
+    const oldPath = orders[0].superintendent_signature_path;
+    const newRel = `/uploads/signatures/${req.file.filename}`;
+    await pool.query(
+      `UPDATE work_orders SET superintendent_signature_path = ?, superintendent_signature_signed_by = ?, superintendent_signature_signed_at = NOW() WHERE id = ?`,
+      [newRel, signedBy, req.params.id]
+    );
+    if (oldPath) {
+      try {
+        const oldName = path.basename(String(oldPath).replace(/^\/+/, ''));
+        if (oldName) fs.unlinkSync(path.join(__dirname, '..', 'uploads', 'signatures', oldName));
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, 'Firma del superintendente adjuntada', req.ip);
+    res.json({ message: 'Firma del superintendente guardada', filePath: newRel });
+  } catch (error) {
+    console.error('Superintendent signature upload error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.delete('/:id/superintendent-signature', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const pool = await getConnection();
+    const [orders] = await pool.query('SELECT superintendent_signature_path FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) return res.status(404).json({ error: 'Work order not found' });
+    const oldPath = orders[0].superintendent_signature_path;
+    await pool.query(
+      `UPDATE work_orders SET superintendent_signature_path = NULL, superintendent_signature_signed_by = NULL, superintendent_signature_signed_at = NULL WHERE id = ?`,
+      [req.params.id]
+    );
+    if (oldPath) {
+      try {
+        const oldName = path.basename(String(oldPath).replace(/^\/+/, ''));
+        if (oldName) fs.unlinkSync(path.join(__dirname, '..', 'uploads', 'signatures', oldName));
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    await logActivity(req.user.id, 'UPDATE', 'work_order', req.params.id, 'Firma del superintendente eliminada', req.ip);
+    res.json({ message: 'Firma del superintendente eliminada' });
+  } catch (error) {
+    console.error('Superintendent signature delete error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Firma de conformidad (Capataz; superintendente solo por imagen adjunta en admin)
 router.post('/:id/conformity-signature', authenticateToken, async (req, res) => {
   try {
     const { signatureData, signedBy, role } = req.body;
-    const signatureRole = (role === 'superintendente' ? 'superintendente' : 'capataz').toLowerCase();
+    if (role === 'superintendente' || (role || '').toLowerCase() === 'superintendente') {
+      return res.status(403).json({ error: 'La firma del superintendente se adjunta desde administración (pestaña Firma)' });
+    }
     if (!signatureData || !signedBy || typeof signedBy !== 'string' || signedBy.trim() === '') {
-      return res.status(400).json({ error: `Se requiere firma y nombre del ${signatureRole === 'superintendente' ? 'superintendente' : 'capataz'}` });
+      return res.status(400).json({ error: 'Se requiere firma y nombre del capataz' });
     }
     const pool = await getConnection();
     const [orders] = await pool.query('SELECT id, assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
@@ -1237,15 +1307,14 @@ router.post('/:id/conformity-signature', authenticateToken, async (req, res) => 
     if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
-    const roleLabel = signatureRole === 'superintendente' ? 'Superintendente' : 'Capataz';
     await pool.query(
       `INSERT INTO work_order_conformity_signatures (work_order_id, signature_role, signature_data, signed_by_name)
-       VALUES (?, ?, ?, ?)
+       VALUES (?, 'capataz', ?, ?)
        ON DUPLICATE KEY UPDATE signature_data = VALUES(signature_data), signed_by_name = VALUES(signed_by_name), signed_at = CURRENT_TIMESTAMP`,
-      [req.params.id, signatureRole, signatureData, signedBy.trim()]
+      [req.params.id, signatureData, signedBy.trim()]
     );
-    await logActivity(req.user.id, 'CONFORMITY_SIGNATURE', 'work_order', req.params.id, `Firma de conformidad (${roleLabel}) por ${signedBy.trim()}`, req.ip);
-    res.status(201).json({ message: `Firma del ${roleLabel} registrada` });
+    await logActivity(req.user.id, 'CONFORMITY_SIGNATURE', 'work_order', req.params.id, `Firma de conformidad (Capataz) por ${signedBy.trim()}`, req.ip);
+    res.status(201).json({ message: 'Firma del Capataz registrada' });
   } catch (error) {
     console.error('Conformity signature error:', error);
     res.status(500).json({ error: 'Internal server error' });
