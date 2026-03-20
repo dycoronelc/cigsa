@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { getStaticUrl } from '../../config.js';
 import { getWorkingDaysCount } from '../../utils/workOrderWorkingDays.js';
+import { openWorkOrderDocumentInNewTab } from '../../utils/openWorkOrderDocument.js';
 import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
 import SearchableSelect from '../../components/SearchableSelect';
@@ -1151,14 +1152,17 @@ export default function WorkOrderDetail() {
                           />
                         </div>
                         <div className="document-info">
-                          <a
-                            href={getStaticUrl(doc.file_path)}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
                             className="document-link"
+                            onClick={() => {
+                              openWorkOrderDocumentInNewTab(id, doc).catch((err) => {
+                                showError(err?.message || 'Error al abrir el documento');
+                              });
+                            }}
                           >
                             {docTypeLabel} {doc.file_name}
-                          </a>
+                          </button>
                           {doc.description && (
                             <p className="document-description">{doc.description}</p>
                           )}

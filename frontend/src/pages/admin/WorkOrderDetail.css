@@ -331,6 +331,15 @@
   gap: 0.5rem;
 }
 
+button.document-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
 .document-link:hover {
   color: var(--primary-dark);
   text-decoration: underline;

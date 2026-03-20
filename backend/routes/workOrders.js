@@ -322,6 +322,127 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
   }
 });
 
+/**
+ * Descargar/ver documento de la OT con JWT (evita abrir /api/uploads en nueva pestaña:
+ * la PWA suele interceptar esa navegación y devolver index.html → Dashboard).
+ */
+router.get('/:id/documents/:documentId/file', authenticateToken, async (req, res) => {
+  try {
+    const workOrderId = parseInt(req.params.id, 10);
+    const documentIdRaw = decodeURIComponent(String(req.params.documentId || ''));
+    if (Number.isNaN(workOrderId)) {
+      return res.status(400).json({ error: 'ID de orden inválido' });
+    }
+
+    const pool = await getConnection();
+    const [orders] = await pool.query(
+      'SELECT id, equipment_id, assigned_technician_id FROM work_orders WHERE id = ?',
+      [workOrderId]
+    );
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Orden no encontrada' });
+    }
+    const wo = orders[0];
+
+    if (req.user.role === 'technician' && Number(wo.assigned_technician_id) !== Number(req.user.id)) {
+      return res.status(403).json({ error: 'Acceso denegado' });
+    }
+
+    const isVisibleToTechnician = (v) => {
+      if (v === undefined || v === null) return true;
+      if (typeof v === 'boolean') return v;
+      if (typeof v === 'number') return v === 1;
+      if (typeof v === 'string') return v === '1' || v.toLowerCase() === 'true';
+      return Boolean(v);
+    };
+
+    let filePath = null;
+    let fileName = 'documento';
+    let mimeType = 'application/octet-stream';
+    let visible = true;
+
+    const equipMatch = documentIdRaw.match(/^equip_(\d+)$/);
+
+    if (equipMatch) {
+      const edId = parseInt(equipMatch[1], 10);
+      if (Number.isNaN(edId) || !wo.equipment_id) {
+        return res.status(404).json({ error: 'Documento no encontrado' });
+      }
+      const [equipDetails] = await pool.query(
+        `SELECT e.housing_id, em.brand_id, em.id as model_id
+         FROM equipment e
+         JOIN equipment_models em ON e.model_id = em.id
+         WHERE e.id = ?`,
+        [wo.equipment_id]
+      );
+      if (equipDetails.length === 0) {
+        return res.status(404).json({ error: 'Documento no encontrado' });
+      }
+      const eq = equipDetails[0];
+      const [edRows] = await pool.query(
+        `SELECT ed.file_path, ed.file_name, ed.mime_type
+         FROM equipment_documents ed
+         LEFT JOIN work_order_documents wod ON wod.equipment_document_id = ed.id AND wod.work_order_id = ?
+         WHERE ed.id = ?
+           AND (ed.brand_id = ? OR ed.model_id = ? OR ed.housing_id = ?)
+           AND wod.id IS NULL`,
+        [workOrderId, edId, eq.brand_id, eq.model_id, eq.housing_id || -1]
+      );
+      if (edRows.length === 0) {
+        return res.status(404).json({ error: 'Documento no encontrado' });
+      }
+      const row = edRows[0];
+      filePath = row.file_path;
+      fileName = row.file_name || fileName;
+      mimeType = row.mime_type || mimeType;
+      visible = true;
+    } else {
+      const wodId = parseInt(documentIdRaw, 10);
+      if (Number.isNaN(wodId)) {
+        return res.status(400).json({ error: 'ID de documento inválido' });
+      }
+      const [wodRows] = await pool.query(
+        `SELECT wod.file_path, wod.file_name, wod.mime_type,
+          CASE WHEN wodp.id IS NOT NULL THEN wodp.is_visible_to_technician ELSE TRUE END as is_visible_to_technician
+         FROM work_order_documents wod
+         LEFT JOIN work_order_document_permissions wodp ON wod.id = wodp.document_id AND wodp.work_order_id = ?
+         WHERE wod.id = ? AND (wod.work_order_id = ? OR wod.equipment_id = ?)`,
+        [workOrderId, wodId, workOrderId, wo.equipment_id]
+      );
+      if (wodRows.length === 0) {
+        return res.status(404).json({ error: 'Documento no encontrado' });
+      }
+      const row = wodRows[0];
+      filePath = row.file_path;
+      fileName = row.file_name || fileName;
+      mimeType = row.mime_type || mimeType;
+      visible = isVisibleToTechnician(row.is_visible_to_technician);
+    }
+
+    if (req.user.role === 'technician' && !visible) {
+      return res.status(403).json({ error: 'Documento no disponible para el técnico' });
+    }
+
+    const baseName = path.basename(String(filePath || '').replace(/^\/+/, ''));
+    if (!baseName || baseName.includes('..')) {
+      return res.status(400).json({ error: 'Ruta inválida' });
+    }
+    const absPath = path.join(__dirname, '..', 'uploads', 'documents', baseName);
+    if (!fs.existsSync(absPath)) {
+      return res.status(404).json({ error: 'Archivo no encontrado en el servidor' });
+    }
+
+    res.setHeader('Content-Type', mimeType || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    fs.createReadStream(absPath).pipe(res);
+  } catch (err) {
+    console.error('Work order document file error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Error al obtener el documento' });
+    }
+  }
+});
+
 // Get work order by ID with all details
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
