@@ -378,6 +378,17 @@ export default function TechnicianWorkOrderDetail() {
     .slice(0, 1);
   const serviceHousings = order.service_housings || [];
 
+  const serviceLabelForMeasurementRow = (row) => {
+    const fromJoin = [row.service_code, row.service_name].filter(Boolean).join(' — ');
+    if (fromJoin) return fromJoin;
+    const wosId = row.work_order_service_id;
+    if (wosId != null && Array.isArray(order.services) && order.services.length > 0) {
+      const svc = order.services.find((s) => Number(s.id) === Number(wosId));
+      if (svc) return [svc.service_code, svc.service_name].filter(Boolean).join(' — ');
+    }
+    return '—';
+  };
+
   // Calcular días trabajados
   const calculateWorkingDays = () => {
     if (!order.start_date) return null;
@@ -546,6 +557,7 @@ export default function TechnicianWorkOrderDetail() {
                         <table className="data-table">
                           <thead>
                             <tr>
+                                <th>Servicio</th>
                                 <th>Medida</th>
                                 <th>Descripción</th>
                                 <th>Nominal</th>
@@ -558,6 +570,7 @@ export default function TechnicianWorkOrderDetail() {
                             <tbody>
                               {housings.map((hm) => (
                                 <tr key={hm.housing_id}>
+                                  <td style={{ maxWidth: 240 }}>{serviceLabelForMeasurementRow(hm)}</td>
                                   <td>{hm.measure_code}</td>
                                   <td>{hm.housing_description || '-'}</td>
                                   <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
@@ -613,6 +626,7 @@ export default function TechnicianWorkOrderDetail() {
                         <table className="data-table">
                           <thead>
                             <tr>
+                                <th>Servicio</th>
                                 <th>Medida</th>
                                 <th>Descripción</th>
                                 <th>Nominal</th>
@@ -625,6 +639,7 @@ export default function TechnicianWorkOrderDetail() {
                             <tbody>
                               {housings.map((hm) => (
                                 <tr key={hm.housing_id}>
+                                  <td style={{ maxWidth: 240 }}>{serviceLabelForMeasurementRow(hm)}</td>
                                   <td>{hm.measure_code}</td>
                                   <td>{hm.housing_description || '-'}</td>
                                   <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
@@ -946,6 +961,7 @@ export default function TechnicianWorkOrderDetail() {
                   <table className="data-table">
                     <thead>
                       <tr>
+                        <th>Servicio</th>
                         <th>Medida</th>
                         <th>Descripción</th>
                         <th>Nominal</th>
@@ -960,6 +976,7 @@ export default function TechnicianWorkOrderDetail() {
                         const row = measurementData.housingMeasurements?.find(r => r.housingId === h.id) || { housingId: h.id, x1: '', y1: '', unit: '' };
                         return (
                           <tr key={h.id}>
+                            <td style={{ maxWidth: 200 }}>{serviceLabelForMeasurementRow(h)}</td>
                             <td style={{ fontWeight: 700 }}>{h.measure_code}</td>
                             <td>{h.description || '-'}</td>
                             <td>{h.nominal_value !== null && h.nominal_value !== undefined ? `${h.nominal_value} ${h.nominal_unit || ''}` : '-'}</td>

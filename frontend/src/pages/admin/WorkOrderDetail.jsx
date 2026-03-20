@@ -220,6 +220,8 @@ export default function WorkOrderDetail() {
         housingId: hm.housing_id,
         measure_code: hm.measure_code,
         housing_description: hm.housing_description,
+        service_code: hm.service_code,
+        service_name: hm.service_name,
         x1: hm.x1 != null && hm.x1 !== '' ? String(hm.x1) : '',
         y1: hm.y1 != null && hm.y1 !== '' ? String(hm.y1) : '',
         unit: hm.unit ?? ''
@@ -904,6 +906,7 @@ export default function WorkOrderDetail() {
                         <table className="data-table">
                           <thead>
                             <tr>
+                              <th>Servicio</th>
                               <th>Medida</th>
                               <th>Descripción</th>
                               <th>Nominal</th>
@@ -916,6 +919,9 @@ export default function WorkOrderDetail() {
                           <tbody>
                             {housings.map((hm) => (
                               <tr key={hm.housing_id}>
+                                <td style={{ maxWidth: 240 }}>
+                                  {[hm.service_code, hm.service_name].filter(Boolean).join(' — ') || '—'}
+                                </td>
                                 <td>{hm.measure_code}</td>
                                 <td>{hm.housing_description || '-'}</td>
                                 <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
@@ -974,6 +980,7 @@ export default function WorkOrderDetail() {
                         <table className="data-table">
                           <thead>
                             <tr>
+                              <th>Servicio</th>
                               <th>Medida</th>
                               <th>Descripción</th>
                               <th>Nominal</th>
@@ -986,6 +993,9 @@ export default function WorkOrderDetail() {
                           <tbody>
                             {housings.map((hm) => (
                               <tr key={hm.housing_id}>
+                                <td style={{ maxWidth: 240 }}>
+                                  {[hm.service_code, hm.service_name].filter(Boolean).join(' — ') || '—'}
+                                </td>
                                 <td>{hm.measure_code}</td>
                                 <td>{hm.housing_description || '-'}</td>
                                 <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
@@ -1398,6 +1408,7 @@ export default function WorkOrderDetail() {
               <table className="data-table">
                 <thead>
                   <tr>
+                    <th>Servicio</th>
                     <th>Medida</th>
                     <th>Descripción</th>
                     <th>X1</th>
@@ -1408,6 +1419,9 @@ export default function WorkOrderDetail() {
                 <tbody>
                   {editMeasurementForm.housingMeasurements.map((hm, idx) => (
                     <tr key={hm.housingId}>
+                      <td style={{ maxWidth: 200 }}>
+                        {[hm.service_code, hm.service_name].filter(Boolean).join(' — ') || '—'}
+                      </td>
                       <td style={{ fontWeight: 700 }}>{hm.measure_code ?? '-'}</td>
                       <td>{hm.housing_description ?? '-'}</td>
                       <td>

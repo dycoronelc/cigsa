@@ -157,11 +157,23 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
     let housingMeasurementsByMeasurementId = new Map();
     try {
       const [hmRows] = await pool.query(`
-        SELECT wohm.*, woh.measure_code, woh.description as housing_description, woh.nominal_value, woh.nominal_unit, woh.tolerance
+        SELECT 
+          wohm.*,
+          woh.measure_code,
+          woh.description as housing_description,
+          woh.nominal_value,
+          woh.nominal_unit,
+          woh.tolerance,
+          woh.work_order_service_id,
+          s.code as service_code,
+          s.name as service_name
         FROM work_order_housing_measurements wohm
         JOIN work_order_housings woh ON wohm.housing_id = woh.id
         JOIN measurements m ON wohm.measurement_id = m.id
-        WHERE m.work_order_id = ? ORDER BY woh.id
+        LEFT JOIN work_order_services wos ON woh.work_order_service_id = wos.id
+        LEFT JOIN services s ON wos.service_id = s.id
+        WHERE m.work_order_id = ?
+        ORDER BY wos.id, woh.id
       `, [workOrderId]);
       (hmRows || []).forEach((r) => {
         const key = String(r.measurement_id);
@@ -377,12 +389,17 @@ router.get('/:id', authenticateToken, async (req, res) => {
           woh.description as housing_description,
           woh.nominal_value,
           woh.nominal_unit,
-          woh.tolerance
+          woh.tolerance,
+          woh.work_order_service_id,
+          s.code as service_code,
+          s.name as service_name
         FROM work_order_housing_measurements wohm
         JOIN work_order_housings woh ON wohm.housing_id = woh.id
         JOIN measurements m ON wohm.measurement_id = m.id
+        LEFT JOIN work_order_services wos ON woh.work_order_service_id = wos.id
+        LEFT JOIN services s ON wos.service_id = s.id
         WHERE m.work_order_id = ?
-        ORDER BY woh.id
+        ORDER BY wos.id, woh.id
       `, [workOrderId]);
 
       (rows || []).forEach((r) => {
