@@ -31,6 +31,32 @@ export const getStaticUrl = (path) => {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
   }
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+
+  if (STATIC_URL) {
+    const base = STATIC_URL.replace(/\/$/, '');
+    return `${base}${normalized}`;
+  }
+
+  // Archivos bajo /uploads: el backend los expone en /uploads y también en /api/uploads
+  // (para que un solo proxy Nginx/Vite hacia /api sirva documentos sin caer en el SPA).
+  if (normalized.startsWith('/uploads/')) {
+    const api = (API_URL || '/api').replace(/\/$/, '');
+    if (!api.startsWith('http://') && !api.startsWith('https://')) {
+      if (typeof window !== 'undefined' && window.location?.origin) {
+        return `${window.location.origin}${api}${normalized}`;
+      }
+    }
+    if (api.startsWith('http://') || api.startsWith('https://')) {
+      try {
+        const u = new URL(api);
+        return `${u.origin}${normalized}`;
+      } catch (_) {
+        /* fall through */
+      }
+    }
+  }
+
   const base = getStaticBaseUrl();
-  return base ? `${base}${path.startsWith('/') ? path : `/${path}`}` : path;
+  return base ? `${base}${normalized}` : normalized;
 };

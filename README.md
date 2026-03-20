@@ -384,6 +384,7 @@ En el navegador:
 - **Backend no arranca:** Revisa `pm2 logs cigsa-backend` y el archivo `.env` en `backend/` (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, JWT_SECRET).
 - **Cambios en la base de datos:** Al iniciar, el backend ejecuta migraciones. Reiniciar con `pm2 restart cigsa-backend` suele ser suficiente para aplicar cambios de esquema.
 - **Aviso "loaded over an insecure connection" al descargar el reporte PDF:** Aparece porque la aplicación se sirve por HTTP. La descarga funciona igual. Para quitar el aviso, sirve el sitio por HTTPS (certificado SSL en Nginx, p. ej. con [Certbot/Let's Encrypt](https://certbot.eff.org/)).
+- **Clic en un documento PDF abre el dashboard:** Suele ocurrir si Nginx envía rutas como `/uploads/...` al SPA en lugar del backend. Asegura el proxy de `/api/` al Node (las URLs de documentos usan `/api/uploads/...`) o proxy explícito de `/uploads/` al backend.
 
 ---
 
@@ -393,7 +394,7 @@ En el navegador:
 
 2. **Base de Datos**: Asegúrate de que MySQL esté corriendo antes de iniciar el backend.
 
-3. **Uploads**: Los archivos se guardan en `backend/uploads/`. Asegúrate de que esta carpeta tenga permisos de escritura.
+3. **Uploads y enlaces a PDF/planos**: Los archivos se guardan en `backend/uploads/`. El backend los sirve en **`/uploads/...`** y también en **`/api/uploads/...`**. El frontend usa **`/api/uploads/...`** cuando la API es relativa (`/api`), para que Nginx pueda enrutar todo bajo `location /api/` al Node y **no** devolver el `index.html` del SPA (evita que al abrir un PDF te redirija al dashboard). Si aún usas solo `location /uploads` hacia el backend, puedes definir `VITE_STATIC_URL` en el build del frontend apuntando al origen del API.
 
 4. **PWA**: La aplicación está configurada como PWA y puede instalarse en dispositivos móviles.
 

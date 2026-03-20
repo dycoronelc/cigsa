@@ -3,6 +3,7 @@
  * Recibe el objeto completo de la OT (como GET /work-orders/:id).
  */
 import PDFDocument from 'pdfkit';
+import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -60,6 +61,45 @@ function signatureDataToBuffer(signatureData) {
 const IMAGE_EXT = /\.(png|jpg|jpeg|gif|webp)$/i;
 const MAX_PLANO_IMAGE_HEIGHT = 200;
 const PLANO_ITEM_HEIGHT = MAX_PLANO_IMAGE_HEIGHT + 18;
+
+/** Misma lógica que en la UI: checkbox = visible para técnico; esos documentos entran al reporte. */
+function isDocumentVisibleForReport(d) {
+  const v = d.is_visible_to_technician;
+  if (v === false || v === 0 || v === '0') return false;
+  return true;
+}
+
+/** Anexa al final del PDF las páginas de cada plano PDF (PDFKit no incrusta PDFs como imagen). */
+async function appendBlueprintPdfPages(mainBuffer, pdfDocItems) {
+  if (!pdfDocItems || pdfDocItems.length === 0) return mainBuffer;
+  let mainPdf;
+  try {
+    mainPdf = await PdfLibDocument.load(mainBuffer);
+  } catch (e) {
+    console.error('appendBlueprintPdfPages: no se pudo cargar el reporte base', e?.message || e);
+    return mainBuffer;
+  }
+  for (const d of pdfDocItems) {
+    const absPath = getDocumentFilePath(d);
+    if (!absPath || !fs.existsSync(absPath)) continue;
+    try {
+      const bytes = fs.readFileSync(absPath);
+      const src = await PdfLibDocument.load(bytes);
+      const pageIndices = src.getPageIndices();
+      const copied = await mainPdf.copyPages(src, pageIndices);
+      copied.forEach((p) => mainPdf.addPage(p));
+    } catch (e) {
+      console.error('appendBlueprintPdfPages: omitiendo', d.file_name, e?.message || e);
+    }
+  }
+  try {
+    const out = await mainPdf.save();
+    return Buffer.from(out);
+  } catch (e) {
+    console.error('appendBlueprintPdfPages: error al guardar', e?.message || e);
+    return mainBuffer;
+  }
+}
 
 /** Dibuja el encabezado (logo, nombre, RUC, cajas día/mes/año) con borde. */
 function drawHeader(doc, reportDate) {
@@ -122,6 +162,24 @@ function formatDateTime(d) {
   }
 }
 
+/** Altura de texto con ajuste de línea (PDFKit); mínimo una línea. */
+function heightOfWrappedText(doc, text, width) {
+  const s = text != null && text !== '' ? String(text) : '-';
+  const h = doc.heightOfString(s, { width: Math.max(1, width) });
+  const line = doc.currentLineHeight(true);
+  return Math.max(line, h);
+}
+
+/** Altura de fila de tabla: el máximo de las celdas (evita solapamiento al envolver descripción). */
+function measurementRowHeight(doc, cells) {
+  const line = doc.currentLineHeight(true);
+  let maxH = line;
+  for (const c of cells) {
+    maxH = Math.max(maxH, heightOfWrappedText(doc, c.text, c.width));
+  }
+  return maxH + 6;
+}
+
 function getReportDate(order) {
   const d = order.completion_date || order.scheduled_date || order.created_at || new Date();
   const date = typeof d === 'string' ? new Date(d) : d;
@@ -165,7 +223,17 @@ function ensureSpace(doc, reportDate, currentY, neededHeight) {
 }
 
 export async function generateWorkOrderReport(orderData) {
-  return new Promise((resolve, reject) => {
+  const documentsForReport = orderData.documents || [];
+  const blueprintCandidates = documentsForReport.filter(
+    (d) =>
+      isDocumentVisibleForReport(d) &&
+      (d.document_type === 'blueprint' ||
+        (d.file_name && /\.(pdf|png|jpg|jpeg|gif|webp)$/i.test(d.file_name)))
+  );
+  const imagePlanos = blueprintCandidates.filter((d) => d.file_name && IMAGE_EXT.test(d.file_name));
+  const pdfPlanosForMerge = blueprintCandidates.filter((d) => d.file_name && /\.pdf$/i.test(d.file_name));
+
+  const pdfBuffer = await new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'LETTER', margin: MARGIN, bufferPages: true });
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
@@ -206,7 +274,6 @@ export async function generateWorkOrderReport(orderData) {
       .sort((a, b) => getDate(b) - getDate(a))
       .slice(0, 1);
     const photos = order.photos || [];
-    const documents = order.documents || [];
     const reportDate = getReportDate(order);
 
     let y = CONTENT_TOP;
@@ -339,31 +406,45 @@ export async function generateWorkOrderReport(orderData) {
     // ----- PÁGINA 2: PLANOS/DOCUMENTOS (al inicio) y METROLOGÍA -----
     drawHeader(doc, reportDate);
 
-    const blueprints = documents.filter((d) => d.document_type === 'blueprint' || (d.file_name && /\.(pdf|png|jpg|jpeg|gif|webp)$/i.test(d.file_name)));
-    const imagePlanos = blueprints.filter((d) => d.file_name && IMAGE_EXT.test(d.file_name));
-    if (imagePlanos.length > 0) {
+    if (imagePlanos.length > 0 || pdfPlanosForMerge.length > 0) {
       doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Planos / Documentos', MARGIN, y);
       y += 16;
       doc.font('Helvetica').fontSize(9);
-      imagePlanos.forEach((d) => {
-        y = ensureSpace(doc, reportDate, y, PLANO_ITEM_HEIGHT);
-        const absPath = getDocumentFilePath(d);
-        const name = d.file_name || 'Documento';
-        if (absPath && fs.existsSync(absPath)) {
-          try {
-            doc.image(absPath, MARGIN, y, { fit: [CONTENT_WIDTH, MAX_PLANO_IMAGE_HEIGHT], align: 'center', valign: 'top' });
-            y += MAX_PLANO_IMAGE_HEIGHT + 4;
-            doc.fillColor('#333').text(name, MARGIN, y, { width: CONTENT_WIDTH });
-            y += 14;
-          } catch (_) {
+      if (imagePlanos.length > 0) {
+        imagePlanos.forEach((d) => {
+          y = ensureSpace(doc, reportDate, y, PLANO_ITEM_HEIGHT);
+          const absPath = getDocumentFilePath(d);
+          const name = d.file_name || 'Documento';
+          if (absPath && fs.existsSync(absPath)) {
+            try {
+              doc.image(absPath, MARGIN, y, { fit: [CONTENT_WIDTH, MAX_PLANO_IMAGE_HEIGHT], align: 'center', valign: 'top' });
+              y += MAX_PLANO_IMAGE_HEIGHT + 4;
+              doc.fillColor('#333').text(name, MARGIN, y, { width: CONTENT_WIDTH });
+              y += 14;
+            } catch (_) {
+              doc.text(`• ${name}`, MARGIN + 10, y);
+              y += 14;
+            }
+          } else {
             doc.text(`• ${name}`, MARGIN + 10, y);
             y += 14;
           }
-        } else {
+        });
+      }
+      if (pdfPlanosForMerge.length > 0) {
+        const pdfListH = 18 + pdfPlanosForMerge.length * 14 + 8;
+        y = ensureSpace(doc, reportDate, y, pdfListH);
+        if (imagePlanos.length > 0) y += 6;
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('black').text('Planos PDF (páginas anexadas al final de este reporte)', MARGIN, y);
+        y += 14;
+        doc.font('Helvetica').fontSize(9);
+        pdfPlanosForMerge.forEach((d) => {
+          const name = d.file_name || 'Plano.pdf';
           doc.text(`• ${name}`, MARGIN + 10, y);
           y += 14;
-        }
-      });
+        });
+        y += 4;
+      }
       doc.fillColor('black');
       y += 16;
     }
@@ -376,7 +457,7 @@ export async function generateWorkOrderReport(orderData) {
     const housings = serviceHousings.length ? serviceHousings : [];
     const byId = (id) => housings.find((h) => h.id === id) || {};
 
-    const nominalTableHeight = housings.length === 0 ? 40 : 30 + housings.length * 16;
+    const nominalTableHeight = housings.length === 0 ? 40 : 30 + housings.length * 48;
     y = ensureSpace(doc, reportDate, y, nominalTableHeight);
 
     doc.font('Helvetica-Bold').fontSize(10).text('MEDIDAS NOMINALES', MARGIN, y);
@@ -386,30 +467,56 @@ export async function generateWorkOrderReport(orderData) {
       y += 20;
     } else {
       doc.font('Helvetica').fontSize(9);
-      const medColW = 70;
-      const descColW = 140;
-      const otherColW = 70;
-      doc.text('Medida', MARGIN, y);
-      doc.text('Descripción', MARGIN + medColW, y);
-      doc.text('Nominal', MARGIN + medColW + descColW, y);
-      doc.text('Tolerancia', MARGIN + medColW + descColW + otherColW, y);
-      doc.text('Unidad', MARGIN + medColW + descColW + otherColW * 2, y);
+      const medColW = 38;
+      const nomColW = 54;
+      const tolColW = 54;
+      const unitColW = 34;
+      const descColW = CONTENT_WIDTH - medColW - nomColW - tolColW - unitColW;
+      const xNom = MARGIN + medColW + descColW;
+      const xTol = xNom + nomColW;
+      const xUnit = xTol + tolColW;
+      doc.text('Medida', MARGIN, y, { width: medColW });
+      doc.text('Descripción', MARGIN + medColW, y, { width: descColW });
+      doc.text('Nominal', xNom, y, { width: nomColW });
+      doc.text('Tolerancia', xTol, y, { width: tolColW });
+      doc.text('Unidad', xUnit, y, { width: unitColW });
       y += 14;
       doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
       y += 8;
       housings.forEach((h) => {
+        const descStr = h.description || '-';
         const nom = h.nominal_value != null ? String(h.nominal_value) : '-';
         const tol = h.tolerance || '-';
         const unit = h.nominal_unit || '-';
-        doc.text(h.measure_code || '-', MARGIN, y);
-        doc.text((h.description || '-').slice(0, 32), MARGIN + medColW, y, { width: descColW });
-        doc.text(nom, MARGIN + medColW + descColW, y);
-        doc.text(tol, MARGIN + medColW + descColW + otherColW, y);
-        doc.text(unit, MARGIN + medColW + descColW + otherColW * 2, y);
-        y += 14;
+        const rowH = measurementRowHeight(doc, [
+          { text: h.measure_code || '-', width: medColW },
+          { text: descStr, width: descColW },
+          { text: nom, width: nomColW },
+          { text: tol, width: tolColW },
+          { text: unit, width: unitColW },
+        ]);
+        doc.text(h.measure_code || '-', MARGIN, y, { width: medColW });
+        doc.text(descStr, MARGIN + medColW, y, { width: descColW });
+        doc.text(nom, xNom, y, { width: nomColW });
+        doc.text(tol, xTol, y, { width: tolColW });
+        doc.text(unit, xUnit, y, { width: unitColW });
+        y += rowH;
       });
       y += 16;
     }
+
+    /** Columnas medidas inicial/final: descripción usa el ancho restante del contenido. */
+    const MET_COL = { med: 30, nom: 50, tol: 50, x1: 44, y1: 44, un: 32 };
+    MET_COL.desc = CONTENT_WIDTH - MET_COL.med - MET_COL.nom - MET_COL.tol - MET_COL.x1 - MET_COL.y1 - MET_COL.un;
+    const metX = {
+      med: MARGIN,
+      desc: MARGIN + MET_COL.med,
+      nom: MARGIN + MET_COL.med + MET_COL.desc,
+      tol: MARGIN + MET_COL.med + MET_COL.desc + MET_COL.nom,
+      x1: MARGIN + MET_COL.med + MET_COL.desc + MET_COL.nom + MET_COL.tol,
+      y1: MARGIN + MET_COL.med + MET_COL.desc + MET_COL.nom + MET_COL.tol + MET_COL.x1,
+      un: MARGIN + MET_COL.med + MET_COL.desc + MET_COL.nom + MET_COL.tol + MET_COL.x1 + MET_COL.y1,
+    };
 
     const initialSectionHeight = (() => {
       if (initialMeasurements.length === 0) return 35;
@@ -417,7 +524,7 @@ export async function generateWorkOrderReport(orderData) {
       initialMeasurements.forEach((m) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
         h += 12;
-        if (hmList.length > 0) h += 14 + 8 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8;
+        if (hmList.length > 0) h += 14 + 8 + hmList.length * 48 + 4 + (m.notes ? 12 : 0) + 8;
       });
       return h;
     })();
@@ -429,40 +536,46 @@ export async function generateWorkOrderReport(orderData) {
       doc.font('Helvetica').text('Sin mediciones iniciales registradas.', MARGIN, y);
       y += 20;
     } else {
-      const colW = { med: 32, desc: 120, nom: 48, tol: 46, x1: 40, y1: 40, un: 36 };
-      const x = (label) => MARGIN + (label === 'med' ? 0 : label === 'desc' ? colW.med : label === 'nom' ? colW.med + colW.desc : label === 'tol' ? colW.med + colW.desc + colW.nom : label === 'x1' ? colW.med + colW.desc + colW.nom + colW.tol : label === 'y1' ? colW.med + colW.desc + colW.nom + colW.tol + colW.x1 : colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1);
-      const tableWidth = colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1 + colW.un;
       initialMeasurements.forEach((m) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
-        const blockH = 12 + (hmList.length > 0 ? 14 + 8 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8 : 0);
+        const blockH = 12 + (hmList.length > 0 ? 14 + 8 + hmList.length * 48 + 4 + (m.notes ? 12 : 0) + 8 : 0);
         y = ensureSpace(doc, reportDate, y, blockH);
         doc.font('Helvetica').fontSize(9).fillColor('black').text(`Fecha: ${formatDateTime(m.measurement_date)}`, MARGIN, y);
         y += 12;
         if (hmList.length > 0) {
           doc.font('Helvetica').fontSize(9);
-          doc.text('Medida', x('med'), y);
-          doc.text('Descripción', x('desc'), y);
-          doc.text('Nominal', x('nom'), y);
-          doc.text('Tolerancia', x('tol'), y);
-          doc.text('X1', x('x1'), y);
-          doc.text('Y1', x('y1'), y);
-          doc.text('Unidad', x('un'), y);
+          doc.text('Medida', metX.med, y, { width: MET_COL.med });
+          doc.text('Descripción', metX.desc, y, { width: MET_COL.desc });
+          doc.text('Nominal', metX.nom, y, { width: MET_COL.nom });
+          doc.text('Tolerancia', metX.tol, y, { width: MET_COL.tol });
+          doc.text('X1', metX.x1, y, { width: MET_COL.x1 });
+          doc.text('Y1', metX.y1, y, { width: MET_COL.y1 });
+          doc.text('Unidad', metX.un, y, { width: MET_COL.un });
           y += 14;
-          doc.moveTo(MARGIN, y).lineTo(MARGIN + tableWidth, y).stroke();
+          doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
           y += 8;
           doc.font('Helvetica').fontSize(9);
           hmList.forEach((hm) => {
             const h = byId(hm.housing_id);
-            const desc = (hm.housing_description || h?.description || '-').slice(0, 28);
+            const descStr = hm.housing_description || h?.description || '-';
             const nom = (hm.nominal_value != null) ? `${hm.nominal_value} ${(hm.nominal_unit || '').trim()}`.trim() || '-' : (h && (h.nominal_value != null) ? `${h.nominal_value} ${h.nominal_unit || ''}`.trim() : '-');
-            doc.text(hm.measure_code || h?.measure_code || '-', x('med'), y);
-            doc.text(desc, x('desc'), y, { width: colW.desc });
-            doc.text(nom, x('nom'), y, { width: colW.nom });
-            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), x('tol'), y, { width: colW.tol });
-            doc.text(String(hm.x1 ?? '-'), x('x1'), y, { width: colW.x1 });
-            doc.text(String(hm.y1 ?? '-'), x('y1'), y, { width: colW.y1 });
-            doc.text(String(hm.unit ?? '-'), x('un'), y);
-            y += 14;
+            const rowH = measurementRowHeight(doc, [
+              { text: hm.measure_code || h?.measure_code || '-', width: MET_COL.med },
+              { text: descStr, width: MET_COL.desc },
+              { text: nom, width: MET_COL.nom },
+              { text: String(hm.tolerance ?? h?.tolerance ?? '-'), width: MET_COL.tol },
+              { text: String(hm.x1 ?? '-'), width: MET_COL.x1 },
+              { text: String(hm.y1 ?? '-'), width: MET_COL.y1 },
+              { text: String(hm.unit ?? '-'), width: MET_COL.un },
+            ]);
+            doc.text(hm.measure_code || h?.measure_code || '-', metX.med, y, { width: MET_COL.med });
+            doc.text(descStr, metX.desc, y, { width: MET_COL.desc });
+            doc.text(nom, metX.nom, y, { width: MET_COL.nom });
+            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), metX.tol, y, { width: MET_COL.tol });
+            doc.text(String(hm.x1 ?? '-'), metX.x1, y, { width: MET_COL.x1 });
+            doc.text(String(hm.y1 ?? '-'), metX.y1, y, { width: MET_COL.y1 });
+            doc.text(String(hm.unit ?? '-'), metX.un, y, { width: MET_COL.un });
+            y += rowH;
           });
           y += 4;
           if (m.notes) {
@@ -480,7 +593,7 @@ export async function generateWorkOrderReport(orderData) {
       finalMeasurements.forEach((m) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
         h += 12;
-        if (hmList.length > 0) h += 14 + 8 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8;
+        if (hmList.length > 0) h += 14 + 8 + hmList.length * 48 + 4 + (m.notes ? 12 : 0) + 8;
       });
       return h;
     })();
@@ -492,40 +605,46 @@ export async function generateWorkOrderReport(orderData) {
       doc.font('Helvetica').text('Sin mediciones finales registradas.', MARGIN, y);
       y += 20;
     } else {
-      const colW = { med: 32, desc: 120, nom: 48, tol: 46, x1: 40, y1: 40, un: 36 };
-      const x = (label) => MARGIN + (label === 'med' ? 0 : label === 'desc' ? colW.med : label === 'nom' ? colW.med + colW.desc : label === 'tol' ? colW.med + colW.desc + colW.nom : label === 'x1' ? colW.med + colW.desc + colW.nom + colW.tol : label === 'y1' ? colW.med + colW.desc + colW.nom + colW.tol + colW.x1 : colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1);
-      const tableWidth = colW.med + colW.desc + colW.nom + colW.tol + colW.x1 + colW.y1 + colW.un;
       finalMeasurements.forEach((m) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
-        const blockH = 12 + (hmList.length > 0 ? 14 + 8 + hmList.length * 14 + 4 + (m.notes ? 12 : 0) + 8 : 0);
+        const blockH = 12 + (hmList.length > 0 ? 14 + 8 + hmList.length * 48 + 4 + (m.notes ? 12 : 0) + 8 : 0);
         y = ensureSpace(doc, reportDate, y, blockH);
         doc.font('Helvetica').fontSize(9).fillColor('black').text(`Fecha: ${formatDateTime(m.measurement_date)}`, MARGIN, y);
         y += 12;
         if (hmList.length > 0) {
           doc.font('Helvetica').fontSize(9);
-          doc.text('Medida', x('med'), y);
-          doc.text('Descripción', x('desc'), y);
-          doc.text('Nominal', x('nom'), y);
-          doc.text('Tolerancia', x('tol'), y);
-          doc.text('X1', x('x1'), y);
-          doc.text('Y1', x('y1'), y);
-          doc.text('Unidad', x('un'), y);
+          doc.text('Medida', metX.med, y, { width: MET_COL.med });
+          doc.text('Descripción', metX.desc, y, { width: MET_COL.desc });
+          doc.text('Nominal', metX.nom, y, { width: MET_COL.nom });
+          doc.text('Tolerancia', metX.tol, y, { width: MET_COL.tol });
+          doc.text('X1', metX.x1, y, { width: MET_COL.x1 });
+          doc.text('Y1', metX.y1, y, { width: MET_COL.y1 });
+          doc.text('Unidad', metX.un, y, { width: MET_COL.un });
           y += 14;
-          doc.moveTo(MARGIN, y).lineTo(MARGIN + tableWidth, y).stroke();
+          doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
           y += 8;
           doc.font('Helvetica').fontSize(9);
           hmList.forEach((hm) => {
             const h = byId(hm.housing_id);
-            const desc = (hm.housing_description || h?.description || '-').slice(0, 28);
+            const descStr = hm.housing_description || h?.description || '-';
             const nom = (hm.nominal_value != null) ? `${hm.nominal_value} ${(hm.nominal_unit || '').trim()}`.trim() || '-' : (h && (h.nominal_value != null) ? `${h.nominal_value} ${h.nominal_unit || ''}`.trim() : '-');
-            doc.text(hm.measure_code || h?.measure_code || '-', x('med'), y);
-            doc.text(desc, x('desc'), y, { width: colW.desc });
-            doc.text(nom, x('nom'), y, { width: colW.nom });
-            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), x('tol'), y, { width: colW.tol });
-            doc.text(String(hm.x1 ?? '-'), x('x1'), y, { width: colW.x1 });
-            doc.text(String(hm.y1 ?? '-'), x('y1'), y, { width: colW.y1 });
-            doc.text(String(hm.unit ?? '-'), x('un'), y);
-            y += 14;
+            const rowH = measurementRowHeight(doc, [
+              { text: hm.measure_code || h?.measure_code || '-', width: MET_COL.med },
+              { text: descStr, width: MET_COL.desc },
+              { text: nom, width: MET_COL.nom },
+              { text: String(hm.tolerance ?? h?.tolerance ?? '-'), width: MET_COL.tol },
+              { text: String(hm.x1 ?? '-'), width: MET_COL.x1 },
+              { text: String(hm.y1 ?? '-'), width: MET_COL.y1 },
+              { text: String(hm.unit ?? '-'), width: MET_COL.un },
+            ]);
+            doc.text(hm.measure_code || h?.measure_code || '-', metX.med, y, { width: MET_COL.med });
+            doc.text(descStr, metX.desc, y, { width: MET_COL.desc });
+            doc.text(nom, metX.nom, y, { width: MET_COL.nom });
+            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), metX.tol, y, { width: MET_COL.tol });
+            doc.text(String(hm.x1 ?? '-'), metX.x1, y, { width: MET_COL.x1 });
+            doc.text(String(hm.y1 ?? '-'), metX.y1, y, { width: MET_COL.y1 });
+            doc.text(String(hm.unit ?? '-'), metX.un, y, { width: MET_COL.un });
+            y += rowH;
           });
           y += 4;
           if (m.notes) {
@@ -625,4 +744,6 @@ export async function generateWorkOrderReport(orderData) {
     drawFooter(doc);
     doc.end();
   });
+
+  return appendBlueprintPdfPages(pdfBuffer, pdfPlanosForMerge);
 }

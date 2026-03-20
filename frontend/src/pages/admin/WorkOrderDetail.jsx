@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { getStaticUrl } from '../../config.js';
+import { getWorkingDaysCount } from '../../utils/workOrderWorkingDays.js';
 import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
 import SearchableSelect from '../../components/SearchableSelect';
@@ -455,27 +456,7 @@ export default function WorkOrderDetail() {
     .sort((a, b) => getMeasurementDate(b) - getMeasurementDate(a))
     .slice(0, 1);
 
-  // Calcular días trabajados
-  const calculateWorkingDays = () => {
-    if (!order.start_date) return null;
-    
-    const startDate = new Date(order.start_date);
-    let endDate;
-    
-    if (order.status === 'completed' && order.completion_date) {
-      endDate = new Date(order.completion_date);
-    } else {
-      endDate = new Date(); // Fecha actual
-    }
-    
-    // Calcular diferencia en milisegundos y convertir a días
-    const diffTime = Math.abs(endDate - startDate);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    return diffDays;
-  };
-
-  const workingDays = calculateWorkingDays();
+  const workingDays = getWorkingDaysCount(order);
 
   const handleDownloadReport = async () => {
     try {
@@ -857,7 +838,10 @@ export default function WorkOrderDetail() {
               {workingDays !== null && (
                 <div className="info-item">
                   <label>Días Trabajados</label>
-                  <p style={{ fontWeight: 600, color: order.status === 'completed' ? '#4CAF50' : '#2196F3' }}>
+                  <p className="working-days-hint" style={{ fontSize: 12, color: 'var(--text-light)', margin: '0 0 6px' }}>
+                    Calculado desde la fecha de inicio hasta hoy, o hasta la fecha de completación si está registrada.
+                  </p>
+                  <p style={{ fontWeight: 600, color: order.completion_date ? '#4CAF50' : '#2196F3' }}>
                     {workingDays} {workingDays === 1 ? 'día' : 'días'}
                   </p>
                 </div>
@@ -1194,7 +1178,11 @@ export default function WorkOrderDetail() {
                   })}
                 </div>
                 <div className="documents-note">
-                  <p>☑️ Marque los documentos que el técnico podrá ver en esta orden de trabajo</p>
+                  <p>
+                    ☑️ Marque los documentos que el técnico podrá ver en esta OT. Los planos marcados se incluyen en el
+                    reporte PDF: imágenes en la sección &quot;Planos / Documentos&quot;; archivos PDF se listan ahí y sus
+                    páginas se anexan al final del reporte.
+                  </p>
                 </div>
               </>
             ) : (

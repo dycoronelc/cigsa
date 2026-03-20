@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { getStaticUrl } from '../../config.js';
+import { getWorkingDaysCount } from '../../utils/workOrderWorkingDays.js';
 import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
 import './Technician.css';
@@ -389,27 +390,7 @@ export default function TechnicianWorkOrderDetail() {
     return '—';
   };
 
-  // Calcular días trabajados
-  const calculateWorkingDays = () => {
-    if (!order.start_date) return null;
-    
-    const startDate = new Date(order.start_date);
-    let endDate;
-    
-    if (order.status === 'completed' && order.completion_date) {
-      endDate = new Date(order.completion_date);
-    } else {
-      endDate = new Date(); // Fecha actual
-    }
-    
-    // Calcular diferencia en milisegundos y convertir a días
-    const diffTime = Math.abs(endDate - startDate);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    return diffDays;
-  };
-
-  const workingDays = calculateWorkingDays();
+  const workingDays = getWorkingDaysCount(order);
 
   return (
     <div className="technician-order-detail">
@@ -521,7 +502,10 @@ export default function TechnicianWorkOrderDetail() {
             {workingDays !== null && (
               <div className="info-item">
                 <label>Días Trabajados</label>
-                <p style={{ fontWeight: 600, color: order.status === 'completed' ? '#4CAF50' : '#2196F3' }}>
+                <p style={{ fontSize: 12, color: 'var(--text-light)', margin: '0 0 6px' }}>
+                  Desde el inicio hasta hoy, o hasta la fecha de completación si ya finalizó.
+                </p>
+                <p style={{ fontWeight: 600, color: order.completion_date ? '#4CAF50' : '#2196F3' }}>
                   {workingDays} {workingDays === 1 ? 'día' : 'días'}
                 </p>
               </div>

@@ -12,6 +12,54 @@ const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
+/** Normaliza datetime-local del front al formato guardado en MySQL. */
+function normalizeDateTimeLocalForDb(val) {
+  if (val == null || val === '') return null;
+  const s = String(val).replace('T', ' ');
+  return s.length === 16 ? `${s}:00` : s;
+}
+
+/**
+ * Tras un PUT admin, estima inicio y fin efectivos para validar coherencia (días trabajados).
+ */
+function getEffectiveStartCompletionAfterPut(order, body) {
+  const { startDate, completionDate, status } = body;
+  let effStart = order.start_date;
+  let effCompletion = order.completion_date;
+
+  if (startDate !== undefined) {
+    effStart = normalizeDateTimeLocalForDb(startDate);
+  }
+  if (completionDate !== undefined) {
+    effCompletion = normalizeDateTimeLocalForDb(completionDate);
+  }
+
+  const willSetStartNow =
+    status !== undefined && status === 'in_progress' && !order.start_date && startDate === undefined;
+  const willSetCompletionNow =
+    status !== undefined && status === 'completed' && !order.completion_date && completionDate === undefined;
+
+  if (willSetStartNow) {
+    effStart = new Date();
+  }
+  if (willSetCompletionNow) {
+    effCompletion = new Date();
+  }
+
+  return { effStart, effCompletion };
+}
+
+function completionBeforeStartError(effStart, effCompletion) {
+  if (!effStart || !effCompletion) return null;
+  const t0 = new Date(effStart).getTime();
+  const t1 = new Date(effCompletion).getTime();
+  if (Number.isNaN(t0) || Number.isNaN(t1)) return null;
+  if (t1 < t0) {
+    return 'La fecha de completación no puede ser anterior a la fecha de inicio.';
+  }
+  return null;
+}
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -738,6 +786,21 @@ router.put('/:id', authenticateToken, async (req, res) => {
       if (updateFields.length === 0) {
         return res.status(400).json({ error: 'No valid fields to update' });
       }
+
+      let effStartT = order.start_date;
+      let effCompletionT = order.completion_date;
+      if (status !== undefined) {
+        if (status === 'in_progress' && !order.start_date) {
+          effStartT = new Date();
+        }
+        if (status === 'completed' && !order.completion_date) {
+          effCompletionT = new Date();
+        }
+      }
+      const techDateErr = completionBeforeStartError(effStartT, effCompletionT);
+      if (techDateErr) {
+        return res.status(400).json({ error: techDateErr });
+      }
       
       updateValues.push(req.params.id);
       await pool.query(`UPDATE work_orders SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
@@ -901,6 +964,16 @@ router.put('/:id', authenticateToken, async (req, res) => {
       if (status === 'completed' && !order.completion_date) {
         updateFields.push('completion_date = NOW()');
       }
+    }
+
+    const { effStart, effCompletion } = getEffectiveStartCompletionAfterPut(order, {
+      startDate,
+      completionDate,
+      status
+    });
+    const dateOrderErr = completionBeforeStartError(effStart, effCompletion);
+    if (dateOrderErr) {
+      return res.status(400).json({ error: dateOrderErr });
     }
     
     if (updateFields.length === 0) {
