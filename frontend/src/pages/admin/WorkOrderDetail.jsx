@@ -248,6 +248,20 @@ export default function WorkOrderDetail() {
     }
   };
 
+  const removeEditMeasurementRow = (idx) => {
+    showConfirm(
+      '¿Quitar esta fila de la medición? Pulse Guardar para guardar los cambios en el servidor.',
+      () => {
+        setEditMeasurementForm((prev) => ({
+          ...prev,
+          housingMeasurements: prev.housingMeasurements.filter((_, i) => i !== idx),
+        }));
+      },
+      'Quitar fila',
+      { confirmText: 'Quitar', cancelText: 'Cancelar', confirmDanger: true }
+    );
+  };
+
   const numberToLetters = (n) => {
     let num = n;
     let s = '';
@@ -1406,11 +1420,19 @@ export default function WorkOrderDetail() {
                     <th>X1</th>
                     <th>Y1</th>
                     <th>Unidad</th>
+                    <th style={{ width: 88 }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
+                  {editMeasurementForm.housingMeasurements.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ padding: '1rem', color: 'var(--text-light)', textAlign: 'center' }}>
+                        No hay filas. Cierre y vuelva a abrir la medición o guarde para dejar la medición sin alojamientos.
+                      </td>
+                    </tr>
+                  ) : null}
                   {editMeasurementForm.housingMeasurements.map((hm, idx) => (
-                    <tr key={hm.housingId}>
+                    <tr key={`${hm.housingId ?? 'h'}-${idx}`}>
                       <td style={{ maxWidth: 200 }}>
                         {[hm.service_code, hm.service_name].filter(Boolean).join(' — ') || '—'}
                       </td>
@@ -1452,6 +1474,24 @@ export default function WorkOrderDetail() {
                           placeholder="In, mm..."
                           style={{ width: 70 }}
                         />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => removeEditMeasurementRow(idx)}
+                          disabled={savingMeasurement}
+                          title="Quitar esta fila de la medición"
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 13,
+                            color: '#b91c1c',
+                            borderColor: '#fecaca',
+                            background: '#fef2f2',
+                          }}
+                        >
+                          Eliminar
+                        </button>
                       </td>
                     </tr>
                   ))}
