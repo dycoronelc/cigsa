@@ -1398,7 +1398,11 @@ export default function WorkOrderDetail() {
 
       {showEditMeasurementModal && editingMeasurement && (
         <div className="modal-overlay" onClick={() => !savingMeasurement && (setShowEditMeasurementModal(false), setEditingMeasurement(null))}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 'min(96vw, 1280px)', width: '100%' }}
+          >
             <h2>Editar medición — {new Date(editingMeasurement.measurement_date).toLocaleString('es-PA')}</h2>
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Observaciones</label>
@@ -1410,17 +1414,17 @@ export default function WorkOrderDetail() {
                 placeholder="Observaciones de la medición"
               />
             </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="data-table">
+            <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
+              <table className="data-table" style={{ width: '100%', tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
-                    <th>Servicio</th>
-                    <th>Medida</th>
-                    <th>Descripción</th>
-                    <th>X1</th>
-                    <th>Y1</th>
-                    <th>Unidad</th>
-                    <th style={{ width: 88 }}>Acciones</th>
+                    <th style={{ width: '30%' }}>Servicio</th>
+                    <th style={{ width: '6%' }}>Medida</th>
+                    <th style={{ width: '18%' }}>Descripción</th>
+                    <th style={{ width: '11%' }}>X1</th>
+                    <th style={{ width: '11%' }}>Y1</th>
+                    <th style={{ width: '8%' }}>Unidad</th>
+                    <th style={{ width: 100 }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1433,7 +1437,7 @@ export default function WorkOrderDetail() {
                   ) : null}
                   {editMeasurementForm.housingMeasurements.map((hm, idx) => (
                     <tr key={`${hm.housingId ?? 'h'}-${idx}`}>
-                      <td style={{ maxWidth: 200 }}>
+                      <td style={{ wordBreak: 'break-word', verticalAlign: 'middle' }}>
                         {[hm.service_code, hm.service_name].filter(Boolean).join(' — ') || '—'}
                       </td>
                       <td style={{ fontWeight: 700 }}>{hm.measure_code ?? '-'}</td>
