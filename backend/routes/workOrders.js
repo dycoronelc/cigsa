@@ -1008,6 +1008,29 @@ router.put('/:id', authenticateToken, async (req, res) => {
           }
         }
 
+        // Quitar de la OT los servicios que el admin eliminó del payload (si no tienen mediciones en sus alojamientos).
+        const payloadServiceIdSet = new Set(servicesList.map((s) => Number(s.serviceId)));
+        const [wosStillInDb] = await pool.query(
+          'SELECT id, service_id FROM work_order_services WHERE work_order_id = ?',
+          [req.params.id]
+        );
+        for (const row of wosStillInDb) {
+          if (payloadServiceIdSet.has(Number(row.service_id))) continue;
+          const [cntRows] = await pool.query(
+            `SELECT COUNT(*) AS c FROM work_order_housing_measurements whm
+             INNER JOIN work_order_housings wh ON wh.id = whm.housing_id
+             WHERE wh.work_order_service_id = ?`,
+            [row.id]
+          );
+          if ((cntRows[0]?.c || 0) > 0) {
+            return res.status(400).json({
+              error:
+                'No se puede quitar un servicio que ya tiene mediciones registradas en sus alojamientos. Elimine o ajuste esas mediciones antes de quitar el servicio.'
+            });
+          }
+          await pool.query('DELETE FROM work_order_services WHERE id = ? AND work_order_id = ?', [row.id, req.params.id]);
+        }
+
         if (updateFields.length === 0) {
           updateFields.push('updated_at = NOW()');
         }
