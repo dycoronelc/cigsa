@@ -952,56 +952,101 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (services !== undefined && Array.isArray(services)) {
       const [measCount] = await pool.query('SELECT COUNT(*) AS c FROM measurements WHERE work_order_id = ?', [req.params.id]);
       if ((measCount[0]?.c || 0) > 0) {
-        // Hay mediciones: actualizar nominal_value, nominal_unit, tolerance y description de los housings existentes sin borrar
-        for (const s of services) {
+        // Hay mediciones: no borrar filas (FK desde work_order_housing_measurements).
+        // - Servicios ya existentes: actualizar housing_count y alojamientos por (work_order_service_id + measure_code).
+        // - Servicios nuevos en el payload: INSERT work_order_services + work_order_housings (sin mediciones aún).
+        const [existingWos] = await pool.query(
+          'SELECT id, service_id, housing_count FROM work_order_services WHERE work_order_id = ?',
+          [req.params.id]
+        );
+        const wosByServiceId = new Map(existingWos.map((r) => [Number(r.service_id), r]));
+
+        const servicesList = services.filter((s) => s && s.serviceId);
+        for (const s of servicesList) {
+          const sid = Number(s.serviceId);
+          const housingCount = Number(s.housingCount) || 0;
           const housings = Array.isArray(s.housings) ? s.housings : [];
+
+          let wosId;
+          const existingRow = wosByServiceId.get(sid);
+          if (existingRow) {
+            wosId = existingRow.id;
+            await pool.query('UPDATE work_order_services SET housing_count = ? WHERE id = ?', [housingCount, wosId]);
+          } else {
+            const [ins] = await pool.query(
+              'INSERT INTO work_order_services (work_order_id, service_id, housing_count) VALUES (?, ?, ?)',
+              [req.params.id, sid, housingCount]
+            );
+            wosId = ins.insertId;
+          }
+
           for (const h of housings) {
-            const code = h.measureCode || h.measure_code;
+            const code = (h.measureCode || h.measure_code || '').toString().trim();
             if (!code) continue;
-            const nomVal = h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? h.nominalValue : null;
+            const nomVal =
+              h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? h.nominalValue : null;
             const nomUnit = h.unit || h.nominalUnit || h.nominal_unit || null;
             const tol = h.tolerance || null;
             const desc = h.description || null;
-            await pool.query(
-              `UPDATE work_order_housings SET nominal_value = ?, nominal_unit = ?, tolerance = ?, description = ? WHERE work_order_id = ? AND measure_code = ?`,
-              [nomVal, nomUnit, tol, desc, req.params.id, code]
+
+            const [whRows] = await pool.query(
+              'SELECT id FROM work_order_housings WHERE work_order_id = ? AND work_order_service_id = ? AND measure_code = ?',
+              [req.params.id, wosId, code]
             );
+            if (whRows.length > 0) {
+              await pool.query(
+                `UPDATE work_order_housings SET nominal_value = ?, nominal_unit = ?, tolerance = ?, description = ? WHERE id = ?`,
+                [nomVal, nomUnit, tol, desc, whRows[0].id]
+              );
+            } else {
+              await pool.query(
+                `INSERT INTO work_order_housings (work_order_id, work_order_service_id, measure_code, description, nominal_value, nominal_unit, tolerance)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [req.params.id, wosId, code, desc, nomVal, nomUnit, tol]
+              );
+            }
           }
         }
-        // Marcar como modificado para que no caiga en "No fields to update"
+
         if (updateFields.length === 0) {
           updateFields.push('updated_at = NOW()');
         }
       } else {
-      await pool.query('DELETE FROM work_order_services WHERE work_order_id = ?', [req.params.id]);
-      const servicesList = services.filter(s => s && s.serviceId);
-      for (const s of servicesList) {
-        const housingCount = Number(s.housingCount) || 0;
-        const [wosRes] = await pool.query(
-          'INSERT INTO work_order_services (work_order_id, service_id, housing_count) VALUES (?, ?, ?)',
-          [req.params.id, s.serviceId, housingCount]
-        );
-        const housings = Array.isArray(s.housings) ? s.housings : [];
-        if (housings.length > 0) {
-          const values = housings.map((h) => ([
-            req.params.id,
-            wosRes.insertId,
-            h.measureCode || h.measure_code || null,
-            h.description || null,
-            h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? h.nominalValue : null,
-            h.unit || h.nominalUnit || h.nominal_unit || null,
-            h.tolerance || null
-          ]));
-          if (values.every(v => v[2])) {
-            await pool.query(
-              `INSERT INTO work_order_housings (work_order_id, work_order_service_id, measure_code, description, nominal_value, nominal_unit, tolerance)
-               VALUES ?`,
-              [values]
-            );
+        await pool.query('DELETE FROM work_order_services WHERE work_order_id = ?', [req.params.id]);
+        const servicesList = services.filter((s) => s && s.serviceId);
+        for (const s of servicesList) {
+          const housingCount = Number(s.housingCount) || 0;
+          const [wosRes] = await pool.query(
+            'INSERT INTO work_order_services (work_order_id, service_id, housing_count) VALUES (?, ?, ?)',
+            [req.params.id, s.serviceId, housingCount]
+          );
+          const housings = Array.isArray(s.housings) ? s.housings : [];
+          if (housings.length > 0) {
+            const values = housings.map((h) => ([
+              req.params.id,
+              wosRes.insertId,
+              h.measureCode || h.measure_code || null,
+              h.description || null,
+              h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? h.nominalValue : null,
+              h.unit || h.nominalUnit || h.nominal_unit || null,
+              h.tolerance || null
+            ]));
+            if (values.every((v) => v[2])) {
+              await pool.query(
+                `INSERT INTO work_order_housings (work_order_id, work_order_service_id, measure_code, description, nominal_value, nominal_unit, tolerance)
+                 VALUES ?`,
+                [values]
+              );
+            }
           }
         }
       }
-      }
+
+      const [[sumRow]] = await pool.query(
+        'SELECT COALESCE(SUM(housing_count), 0) AS t FROM work_order_services WHERE work_order_id = ?',
+        [req.params.id]
+      );
+      await pool.query('UPDATE work_orders SET service_housing_count = ? WHERE id = ?', [sumRow.t, req.params.id]);
     }
     if (locationId !== undefined) {
       const locId = locationId !== null && locationId !== '' ? parseInt(locationId, 10) : null;
