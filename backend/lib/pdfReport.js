@@ -696,7 +696,9 @@ export async function generateWorkOrderReport(orderData) {
       ? signatureDataToBuffer(conformitySuperintendente.signature_data)
       : null;
 
-    const signatureBlockHeight2 = 180;
+    /** Separación entre bloques de firma (espacio para firmar a mano en el impreso). ~20 mm */
+    const MANUAL_SIGNATURE_GAP_PT = 56;
+    const signatureBlockHeight2 = 220;
     y = ensureSpace(doc, reportDate, y, signatureBlockHeight2);
     doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Firma del Capataz que recibe el trabajo', MARGIN, y);
     y += 18;
@@ -718,6 +720,8 @@ export async function generateWorkOrderReport(orderData) {
     } else {
       y += 6;
     }
+
+    y += MANUAL_SIGNATURE_GAP_PT;
 
     y = ensureSpace(doc, reportDate, y, signatureBlockHeight2);
     doc.font('Helvetica-Bold').fontSize(11).fillColor('black').text('Firma del Superintendente', MARGIN, y);
