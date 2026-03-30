@@ -162,6 +162,33 @@ function formatDateTime(d) {
   }
 }
 
+/** Fila de medición por alojamiento con al menos X1, Y1 o unidad (misma regla que las tablas de medición del PDF). */
+function housingMeasurementRowHasData(hm) {
+  return (
+    (hm.x1 != null && hm.x1 !== '') ||
+    (hm.y1 != null && hm.y1 !== '') ||
+    (hm.unit != null && hm.unit !== '')
+  );
+}
+
+/**
+ * Cuenta alojamientos del servicio que figuran en la medición final del reporte con datos registrados.
+ * Usa la misma medición final que la sección "Mediciones finales" (la más reciente con datos).
+ */
+function countExecutedHousingsWithFinalMeasurement(svc, finalMeasurement) {
+  if (!finalMeasurement) return 0;
+  const rows = finalMeasurement.housing_measurements || finalMeasurement.housingMeasurements || [];
+  const housings = svc.housings || [];
+  const withData = new Set();
+  for (const hm of rows) {
+    const hid = hm.housing_id ?? hm.housingId;
+    if (hid == null || !housings.some((h) => h.id == hid)) continue;
+    if (!housingMeasurementRowHasData(hm)) continue;
+    withData.add(String(hid));
+  }
+  return withData.size;
+}
+
 /** Altura de texto con ajuste de línea (PDFKit); mínimo una línea. */
 function heightOfWrappedText(doc, text, width) {
   const s = text != null && text !== '' ? String(text) : '-';
@@ -216,7 +243,8 @@ function spaceForMeasurementTableStart(doc, m, byId, MET_COL) {
 }
 
 function getReportDate(order) {
-  const d = order.completion_date || order.scheduled_date || order.created_at || new Date();
+  const d = order.completion_date;
+  if (!d) return { day: '-', month: '-', year: '-' };
   const date = typeof d === 'string' ? new Date(d) : d;
   if (isNaN(date.getTime())) return { day: '-', month: '-', year: '-' };
   return {
@@ -321,7 +349,7 @@ export async function generateWorkOrderReport(orderData) {
     y += 22;
 
     doc.font('Helvetica').fontSize(10);
-    doc.text(`Fecha: ${formatDate(order.completion_date || order.scheduled_date || order.created_at)}`, MARGIN, y);
+    doc.text(`Fecha: ${formatDate(order.completion_date)}`, MARGIN, y);
     doc.text(`Cliente: ${order.client_name || '-'}${order.company_name ? ' - ' + order.company_name : ''}`, MARGIN + 200, y);
     y += 16;
     doc.text(`N° Orden de Servicio del Cliente: ${order.client_service_order_number || '-'}`, MARGIN, y);
@@ -372,7 +400,7 @@ export async function generateWorkOrderReport(orderData) {
     const serviceColWidth = 280;
     services.forEach((svc) => {
       const cot = svc.housing_count || 0;
-      const ejec = (svc.housings && svc.housings.length) || 0;
+      const ejec = countExecutedHousingsWithFinalMeasurement(svc, finalMeasurements[0] || null);
       const name = svc.service_name || svc.service_code || '-';
       const nameHeight = doc.heightOfString(name, { width: serviceColWidth });
       const rowHeight = Math.max(20, Math.ceil(nameHeight) + 10);

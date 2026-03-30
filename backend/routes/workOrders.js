@@ -164,6 +164,18 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    const reportAllowedStatuses = new Set(['completed', 'accepted']);
+    if (!reportAllowedStatuses.has(order.status)) {
+      return res.status(403).json({
+        error: 'El reporte PDF solo está disponible cuando la orden está en estado Completada o Aceptada. La fecha del reporte es la de completación.',
+      });
+    }
+    if (!order.completion_date) {
+      return res.status(403).json({
+        error: 'No se puede generar el reporte PDF sin fecha de completación registrada en la orden.',
+      });
+    }
+
     const [wosRows] = await pool.query(`
       SELECT wos.id, wos.service_id, wos.housing_count, s.name as service_name, s.code as service_code, s.description as service_description
       FROM work_order_services wos
@@ -1005,6 +1017,31 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 [req.params.id, wosId, code, desc, nomVal, nomUnit, tol]
               );
             }
+          }
+
+          const payloadCodes = new Set(
+            housings
+              .map((h) => (h.measureCode || h.measure_code || '').toString().trim())
+              .filter(Boolean)
+          );
+          const [dbHousingRows] = await pool.query(
+            'SELECT id, measure_code FROM work_order_housings WHERE work_order_id = ? AND work_order_service_id = ?',
+            [req.params.id, wosId]
+          );
+          for (const dbH of dbHousingRows || []) {
+            const code = (dbH.measure_code || '').toString().trim();
+            if (!code || payloadCodes.has(code)) continue;
+            const [mref] = await pool.query(
+              'SELECT COUNT(*) AS c FROM work_order_housing_measurements WHERE housing_id = ?',
+              [dbH.id]
+            );
+            if ((mref[0]?.c || 0) > 0) {
+              return res.status(400).json({
+                error:
+                  `No se puede eliminar el alojamiento «${code}»: tiene mediciones registradas. Quite esas filas al editar la medición antes de eliminar el alojamiento.`,
+              });
+            }
+            await pool.query('DELETE FROM work_order_housings WHERE id = ? AND work_order_id = ?', [dbH.id, req.params.id]);
           }
         }
 

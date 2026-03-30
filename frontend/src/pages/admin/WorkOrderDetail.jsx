@@ -9,6 +9,9 @@ import AlertDialog from '../../components/AlertDialog';
 import SearchableSelect from '../../components/SearchableSelect';
 import './WorkOrderDetail.css';
 
+/** Estados en los que se permite generar el reporte PDF (cabecera usa fecha de completación). */
+const REPORT_DOWNLOAD_STATUSES = new Set(['completed', 'accepted']);
+
 export default function WorkOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -325,6 +328,31 @@ export default function WorkOrderDetail() {
     }
   };
 
+  const removeEditHousingRow = (housingIdx) => {
+    if (editingServiceIdx === null) return;
+    showConfirm(
+      '¿Eliminar este alojamiento? Debe guardar la OT para aplicar el cambio. Si ya hay mediciones en ese alojamiento, el servidor no lo permitirá hasta quitarlas.',
+      () => {
+        const next = [...(editData.services || [])];
+        const svc = next[editingServiceIdx];
+        const hList = [...(svc.housings || [])];
+        hList.splice(housingIdx, 1);
+        next[editingServiceIdx] = {
+          ...svc,
+          housings: hList,
+          housingCount: hList.length,
+        };
+        setEditData({ ...editData, services: next });
+        if (hList.length === 0) {
+          setShowHousingsModal(false);
+          setEditingServiceIdx(null);
+        }
+      },
+      'Eliminar alojamiento',
+      { confirmText: 'Eliminar', cancelText: 'Cancelar', confirmDanger: true }
+    );
+  };
+
   const saveEdit = async () => {
     if (!order) return;
     const payload = {};
@@ -473,7 +501,18 @@ export default function WorkOrderDetail() {
 
   const workingDays = getWorkingDaysCount(order);
 
+  const canDownloadReport =
+    REPORT_DOWNLOAD_STATUSES.has(order.status) && Boolean(order.completion_date);
+
   const handleDownloadReport = async () => {
+    if (!canDownloadReport) {
+      showError(
+        !REPORT_DOWNLOAD_STATUSES.has(order.status)
+          ? 'El reporte PDF solo está disponible cuando la orden está en estado Completada o Aceptada.'
+          : 'Registre la fecha de completación de la orden para generar el reporte PDF.'
+      );
+      return;
+    }
     try {
       const response = await api.get(`/work-orders/${id}/report`, { responseType: 'blob' });
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -485,7 +524,20 @@ export default function WorkOrderDetail() {
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (e) {
-      showError(e.response?.data?.error || 'Error al descargar el reporte PDF');
+      let msg = 'Error al descargar el reporte PDF';
+      const data = e.response?.data;
+      if (data instanceof Blob) {
+        try {
+          const text = await data.text();
+          const j = JSON.parse(text);
+          if (j?.error) msg = j.error;
+        } catch (_) {
+          /* keep default */
+        }
+      } else if (typeof data?.error === 'string') {
+        msg = data.error;
+      }
+      showError(msg);
     }
   };
 
@@ -500,7 +552,19 @@ export default function WorkOrderDetail() {
           <p>{order.title}</p>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button type="button" className="btn-secondary" onClick={handleDownloadReport} title="Descargar reporte en PDF">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleDownloadReport}
+            disabled={!canDownloadReport}
+            title={
+              canDownloadReport
+                ? 'Descargar reporte en PDF (fecha de cabecera: completación)'
+                : !REPORT_DOWNLOAD_STATUSES.has(order.status)
+                  ? 'Disponible solo cuando la OT esté Completada o Aceptada'
+                  : 'Registre la fecha de completación para habilitar el reporte PDF'
+            }
+          >
             📄 Reporte PDF
           </button>
           {!editMode ? (
@@ -1330,31 +1394,44 @@ export default function WorkOrderDetail() {
 
       {showHousingsModal && editingServiceIdx !== null && editMode && (
         <div className="modal-overlay" onClick={() => closeHousingsModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 750 }}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 'min(96vw, 1280px)', width: '100%' }}
+          >
             <h2>Alojamientos — {(services.find(s => s.id === parseInt((editData.services || [])[editingServiceIdx]?.serviceId))?.name || 'Servicio')}</h2>
             <p style={{ marginTop: -8, color: '#6e6b7b' }}>
               Complete la información de cada alojamiento. Cada servicio comienza con A, B, C...
             </p>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="data-table">
+            <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
+              <table className="data-table" style={{ width: '100%', tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
-                    <th>Medida</th>
-                    <th>Descripción</th>
-                    <th>Medida Nominal</th>
-                    <th>Tolerancia</th>
-                    <th>Unidad</th>
+                    <th style={{ width: '7%' }}>Medida</th>
+                    <th style={{ width: '32%' }}>Descripción</th>
+                    <th style={{ width: '12%' }}>Medida Nominal</th>
+                    <th style={{ width: '18%' }}>Tolerancia</th>
+                    <th style={{ width: '12%' }}>Unidad</th>
+                    <th style={{ width: 100 }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
+                  {((editData.services || [])[editingServiceIdx]?.housings || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '1rem', color: 'var(--text-light)', textAlign: 'center' }}>
+                        No hay alojamientos. Ajuste la cantidad en la lista de servicios o cierre este cuadro.
+                      </td>
+                    </tr>
+                  ) : null}
                   {((editData.services || [])[editingServiceIdx]?.housings || []).map((h, idx) => (
-                    <tr key={h.measureCode + idx}>
-                      <td style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{h.measureCode}</td>
+                    <tr key={(h.measureCode || 'm') + '-' + idx}>
+                      <td style={{ whiteSpace: 'nowrap', fontWeight: 700, verticalAlign: 'middle' }}>{h.measureCode}</td>
                       <td>
                         <input
                           value={h.description || ''}
                           onChange={(e) => updateEditHousing(idx, 'description', e.target.value)}
                           placeholder="Descripción del alojamiento"
+                          style={{ width: '100%', boxSizing: 'border-box' }}
                         />
                       </td>
                       <td>
@@ -1364,6 +1441,7 @@ export default function WorkOrderDetail() {
                           value={h.nominalValue ?? ''}
                           onChange={(e) => updateEditHousing(idx, 'nominalValue', e.target.value)}
                           placeholder="0.000"
+                          style={{ width: '100%', boxSizing: 'border-box' }}
                         />
                       </td>
                       <td>
@@ -1372,6 +1450,7 @@ export default function WorkOrderDetail() {
                           value={h.tolerance || ''}
                           onChange={(e) => updateEditHousing(idx, 'tolerance', e.target.value)}
                           placeholder="+0.5, -0.3, ±0.2"
+                          style={{ width: '100%', boxSizing: 'border-box' }}
                         />
                       </td>
                       <td>
@@ -1379,7 +1458,25 @@ export default function WorkOrderDetail() {
                           value={h.nominalUnit || ''}
                           onChange={(e) => updateEditHousing(idx, 'nominalUnit', e.target.value)}
                           placeholder="mm, in, etc."
+                          style={{ width: '100%', boxSizing: 'border-box' }}
                         />
+                      </td>
+                      <td style={{ verticalAlign: 'middle' }}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => removeEditHousingRow(idx)}
+                          title="Eliminar este alojamiento"
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 13,
+                            color: '#b91c1c',
+                            borderColor: '#fecaca',
+                            background: '#fef2f2',
+                          }}
+                        >
+                          Eliminar
+                        </button>
                       </td>
                     </tr>
                   ))}
