@@ -62,6 +62,7 @@ export default function Equipment() {
   const [modelFilter, setModelFilter] = useState('');
   const [housingFilter, setHousingFilter] = useState('');
   const [equipmentFilter, setEquipmentFilter] = useState('');
+  const [documentFilter, setDocumentFilter] = useState('');
 
   const [loading, setLoading] = useState(true);
 
@@ -404,7 +405,34 @@ export default function Equipment() {
     });
   }, [housings, housingFilter, selectedModelIdForHousing]);
 
-  const filteredDocuments = useMemo(() => equipmentDocuments, [equipmentDocuments]);
+  const filteredDocuments = useMemo(() => {
+    if (!documentFilter.trim()) return equipmentDocuments;
+    const search = documentFilter.toLowerCase();
+    return equipmentDocuments.filter((doc) => {
+      const typeLabel =
+        doc.document_type === 'manual'
+          ? 'manual'
+          : doc.document_type === 'blueprint'
+            ? 'plano'
+            : doc.document_type === 'specification'
+              ? 'especificación'
+              : 'otro';
+      const sizeStr =
+        doc.file_size != null ? `${(doc.file_size / 1024).toFixed(2)} kb` : '';
+      return (
+        doc.file_name?.toLowerCase().includes(search) ||
+        doc.document_type?.toLowerCase().includes(search) ||
+        typeLabel.includes(search) ||
+        doc.brand_name?.toLowerCase().includes(search) ||
+        doc.model_name?.toLowerCase().includes(search) ||
+        doc.housing_name?.toLowerCase().includes(search) ||
+        String(doc.description ?? '')
+          .toLowerCase()
+          .includes(search) ||
+        sizeStr.includes(search)
+      );
+    });
+  }, [equipmentDocuments, documentFilter]);
 
   const { items: sortedBrands, requestSort: requestSortBrands, getSortDirection: getBrandDir } = useSortableData(filteredBrands);
   const { items: sortedModels, requestSort: requestSortModels, getSortDirection: getModelDir } = useSortableData(filteredModels);
@@ -724,6 +752,17 @@ export default function Equipment() {
       {activeTab === 'documents' && (
         <>
           <div className="table-header">
+            <div className="table-filters">
+              <div className="search-input-wrapper">
+                <SearchIcon size={16} />
+                <input
+                  type="text"
+                  placeholder="Buscar por archivo, tipo, marca, modelo, alojamiento..."
+                  value={documentFilter}
+                  onChange={(e) => setDocumentFilter(e.target.value)}
+                />
+              </div>
+            </div>
             <div className="table-header-actions">
               <button onClick={() => {
                 setDocumentFormData({ brandId: '', modelId: '', documentType: 'manual', description: '' });
