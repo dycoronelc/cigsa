@@ -943,6 +943,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
       return res.json({ message: 'Work order updated successfully' });
     }
     
+    // Admin: órdenes cerradas solo editables por administrador (título, servicios, fechas, etc.)
+    const closedOrderStatuses = new Set(['completed', 'accepted', 'cancelled']);
+    if (closedOrderStatuses.has(order.status) && req.user.role !== 'admin') {
+      return res.status(403).json({
+        error:
+          'Solo un administrador puede modificar órdenes completadas, aceptadas o canceladas.',
+      });
+    }
+
     // Admin can update all fields
     const updateFields = [];
     const updateValues = [];
@@ -1017,6 +1026,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 [req.params.id, wosId, code, desc, nomVal, nomUnit, tol]
               );
             }
+          }
+
+          // Sin filas de alojamiento en el payload pero count > 0: payload incompleto (p. ej. solo se añadió otro servicio).
+          // NO eliminar alojamientos en BD: ON DELETE CASCADE en work_order_housing_measurements borraría las medidas.
+          if (housings.length === 0 && housingCount > 0) {
+            continue;
           }
 
           const payloadCodes = new Set(
@@ -1107,6 +1122,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
         [req.params.id]
       );
       await pool.query('UPDATE work_orders SET service_housing_count = ? WHERE id = ?', [sumRow.t, req.params.id]);
+      // Sin mediciones: el bloque anterior no añade columnas a updateFields; asegurar un UPDATE mínimo.
+      if (updateFields.length === 0) {
+        updateFields.push('updated_at = NOW()');
+      }
     }
     if (locationId !== undefined) {
       const locId = locationId !== null && locationId !== '' ? parseInt(locationId, 10) : null;

@@ -386,24 +386,35 @@ export default function WorkOrderDetail() {
     const currentCompletionDate = toDateTimeLocalValue(order.completion_date);
     if (editData.completionDate !== currentCompletionDate) payload.completionDate = editData.completionDate || null;
 
-    const currentServices = (order.services || []).map(s => ({
-      serviceId: String(s.service_id),
-      housingCount: (s.housings || []).length || s.housing_count || 0,
-      housings: (s.housings || []).map(h => ({ measureCode: h.measure_code, description: h.description, nominalValue: h.nominal_value, nominalUnit: h.nominal_unit, tolerance: h.tolerance }))
-    }));
-    const newServices = (editData.services || []).filter(s => s.serviceId).map(s => ({
-      serviceId: parseInt(s.serviceId),
-      housingCount: parseInt(s.housingCount) || 0,
-      housings: (s.housings || []).map(h => ({
+    const mapHousingRow = (h) => {
+      const nv = h.nominalValue ?? h.nominal_value;
+      const hasNom = nv !== undefined && nv !== null && nv !== '';
+      return {
         measureCode: h.measureCode || h.measure_code,
         description: h.description,
-        nominalValue: h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? parseFloat(h.nominalValue) : null,
-        nominalUnit: h.nominalValue !== undefined && h.nominalValue !== null && h.nominalValue !== '' ? (h.nominalUnit || h.nominal_unit) : null,
+        nominalValue: hasNom ? parseFloat(nv) : null,
+        nominalUnit: hasNom ? (h.nominalUnit || h.nominal_unit) : null,
         tolerance: h.tolerance || null
-      }))
-    }));
-    const servicesChanged = JSON.stringify(currentServices) !== JSON.stringify(newServices);
-    if (servicesChanged) {
+      };
+    };
+    const newServices = (editData.services || []).filter(s => s.serviceId).map(s => {
+      let rows = (s.housings || []).map(mapHousingRow);
+      const count = parseInt(s.housingCount, 10) || 0;
+      if (rows.length === 0 && count > 0) {
+        const fromOrder = (order.services || []).find((os) => String(os.service_id) === String(s.serviceId));
+        if (fromOrder && (fromOrder.housings || []).length > 0) {
+          rows = (fromOrder.housings || []).map(mapHousingRow);
+        }
+      }
+      return {
+        serviceId: parseInt(s.serviceId, 10),
+        housingCount: count,
+        housings: rows
+      };
+    });
+    // Incluir siempre servicios si hay filas: evita 400 "No fields to update" cuando el stringify
+    // no detecta cambios pese a ediciones en alojamientos/medidas nominales.
+    if (newServices.length > 0) {
       payload.services = newServices;
     }
 
