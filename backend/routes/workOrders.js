@@ -60,6 +60,33 @@ function completionBeforeStartError(effStart, effCompletion) {
   return null;
 }
 
+/**
+ * Si existe una medición inicial (la más antigua), enlaza alojamientos de la OT que aún no tengan fila.
+ * Así, servicios agregados después aparecen en Mediciones Iniciales (X1/Y1 vacíos hasta completarlos).
+ */
+async function linkNewHousingsToInitialMeasurement(pool, workOrderId) {
+  const [initialRows] = await pool.query(
+    `SELECT id FROM measurements 
+     WHERE work_order_id = ? AND LOWER(COALESCE(measurement_type, '')) = 'initial' 
+     ORDER BY measurement_date ASC, id ASC LIMIT 1`,
+    [workOrderId]
+  );
+  if (!initialRows?.length) return;
+
+  const initialMeasurementId = initialRows[0].id;
+  await pool.query(
+    `INSERT INTO work_order_housing_measurements (measurement_id, housing_id, x1, y1, unit)
+     SELECT ?, wh.id, NULL, NULL, NULL
+     FROM work_order_housings wh
+     WHERE wh.work_order_id = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM work_order_housing_measurements x
+         WHERE x.measurement_id = ? AND x.housing_id = wh.id
+       )`,
+    [initialMeasurementId, workOrderId, initialMeasurementId]
+  );
+}
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -1122,6 +1149,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
         [req.params.id]
       );
       await pool.query('UPDATE work_orders SET service_housing_count = ? WHERE id = ?', [sumRow.t, req.params.id]);
+      try {
+        await linkNewHousingsToInitialMeasurement(pool, parseInt(req.params.id, 10));
+      } catch (linkErr) {
+        console.error('linkNewHousingsToInitialMeasurement:', linkErr?.message || linkErr);
+      }
       // Sin mediciones: el bloque anterior no añade columnas a updateFields; asegurar un UPDATE mínimo.
       if (updateFields.length === 0) {
         updateFields.push('updated_at = NOW()');
