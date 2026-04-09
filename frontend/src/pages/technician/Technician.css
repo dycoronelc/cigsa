@@ -253,6 +253,174 @@
   gap: 0.5rem;
 }
 
+/* Mediciones: tabla con scroll en tablet / escritorio; tarjetas en móvil (WorkOrderDetail) */
+.technician-measurement-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-left: -0.25rem;
+  margin-right: -0.25rem;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+
+.technician-measure-scroll-hint {
+  display: none;
+  font-size: 0.75rem;
+  color: var(--text-light);
+  margin: 0 0 0.5rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 1024px) {
+  .technician-measure-scroll-hint {
+    display: block;
+  }
+}
+
+.technician-measurement-table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 52rem;
+  max-width: none;
+  font-size: 0.8125rem;
+  background: var(--card-bg);
+}
+
+.technician-measurement-table th,
+.technician-measurement-table td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.technician-measurement-table th {
+  background: var(--bg);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.technician-measurement-table input {
+  width: 100%;
+  min-width: 4.5rem;
+  max-width: 7rem;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.875rem;
+  box-sizing: border-box;
+}
+
+.technician-housing-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.technician-housing-cards--form {
+  margin-top: 0.25rem;
+}
+
+.technician-housing-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.technician-housing-card--form {
+  background: var(--bg);
+}
+
+.technician-housing-card__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.technician-housing-card__row--inline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+}
+
+.technician-housing-card__row--inline > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 4.5rem;
+  flex: 1 1 auto;
+}
+
+.technician-housing-card__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-light);
+}
+
+.technician-housing-card__value {
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.technician-housing-card__value--code {
+  font-weight: 700;
+}
+
+.technician-housing-card__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.technician-housing-card__field label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.technician-housing-card__field input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.modal-content.modal-content--measurement {
+  max-width: min(96vw, 56rem);
+}
+
+.modal-overlay--measurement-sheet {
+  align-items: center;
+}
+
+@media (max-width: 768px) {
+  .modal-overlay--measurement-sheet {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .modal-content.modal-content--measurement {
+    width: 100%;
+    max-width: none;
+    max-height: 100dvh;
+    max-height: 100vh;
+    border-radius: 0;
+    margin: 0;
+    padding: 1rem 1rem 1.25rem;
+    overflow-y: auto;
+  }
+}
+
 .photos-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

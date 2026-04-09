@@ -8,6 +8,27 @@ import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
 import './Technician.css';
 
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia(query).matches;
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const mq = window.matchMedia(query);
+    const onChange = () => setMatches(mq.matches);
+    setMatches(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [query]);
+  return matches;
+}
+
+function formatNominalDisplay(h) {
+  if (h.nominal_value === null || h.nominal_value === undefined) return '-';
+  return `${h.nominal_value} ${h.nominal_unit || ''}`.trim();
+}
+
 // Comprime una imagen en el navegador para subir más rápido (menor tamaño y tiempo)
 function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.82) {
   return new Promise((resolve) => {
@@ -76,6 +97,7 @@ export default function TechnicianWorkOrderDetail() {
   const galleryInputRef = useRef(null);
   const signatureCanvasRefCapataz = useRef(null);
   const activeSignatureCanvasRef = useRef(null);
+  const compactMeasurementsLayout = useMediaQuery('(max-width: 768px)');
 
   const isDocVisibleToTechnician = (d) => {
     const v = d?.is_visible_to_technician;
@@ -391,6 +413,88 @@ export default function TechnicianWorkOrderDetail() {
     return '—';
   };
 
+  const renderHousingMeasurementsRead = (housings) => {
+    if (compactMeasurementsLayout) {
+      return (
+        <div className="technician-housing-cards">
+          {housings.map((hm) => (
+            <div key={hm.housing_id} className="technician-housing-card">
+              <div className="technician-housing-card__row">
+                <span className="technician-housing-card__label">Servicio</span>
+                <span className="technician-housing-card__value">{serviceLabelForMeasurementRow(hm)}</span>
+              </div>
+              <div className="technician-housing-card__row">
+                <span className="technician-housing-card__label">Medida</span>
+                <span className="technician-housing-card__value">{hm.measure_code ?? '—'}</span>
+              </div>
+              <div className="technician-housing-card__row">
+                <span className="technician-housing-card__label">Descripción</span>
+                <span className="technician-housing-card__value">{hm.housing_description || '—'}</span>
+              </div>
+              <div className="technician-housing-card__row technician-housing-card__row--inline">
+                <div>
+                  <span className="technician-housing-card__label">Nominal</span>
+                  <span className="technician-housing-card__value">{formatNominalDisplay(hm)}</span>
+                </div>
+                <div>
+                  <span className="technician-housing-card__label">Tolerancia</span>
+                  <span className="technician-housing-card__value">{hm.tolerance ?? '—'}</span>
+                </div>
+              </div>
+              <div className="technician-housing-card__row technician-housing-card__row--inline">
+                <div>
+                  <span className="technician-housing-card__label">X1</span>
+                  <span className="technician-housing-card__value">{hm.x1 ?? '—'}</span>
+                </div>
+                <div>
+                  <span className="technician-housing-card__label">Y1</span>
+                  <span className="technician-housing-card__value">{hm.y1 ?? '—'}</span>
+                </div>
+                <div>
+                  <span className="technician-housing-card__label">Unidad</span>
+                  <span className="technician-housing-card__value">{hm.unit ?? '—'}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <div className="technician-measurement-table-wrap">
+        <p className="technician-measure-scroll-hint">Deslice horizontalmente para ver todas las columnas.</p>
+        <table className="technician-measurement-table">
+          <thead>
+            <tr>
+              <th>Servicio</th>
+              <th>Medida</th>
+              <th>Descripción</th>
+              <th>Nominal</th>
+              <th>Tolerancia</th>
+              <th>X1</th>
+              <th>Y1</th>
+              <th>Unidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            {housings.map((hm) => (
+              <tr key={hm.housing_id}>
+                <td>{serviceLabelForMeasurementRow(hm)}</td>
+                <td>{hm.measure_code}</td>
+                <td>{hm.housing_description || '-'}</td>
+                <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}`.trim() : '-'}</td>
+                <td>{hm.tolerance || '-'}</td>
+                <td>{hm.x1 ?? '-'}</td>
+                <td>{hm.y1 ?? '-'}</td>
+                <td>{hm.unit || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   const workingDays = getWorkingDaysCount(order);
 
   return (
@@ -538,36 +642,7 @@ export default function TechnicianWorkOrderDetail() {
                       <div style={{ fontWeight: 600, marginBottom: 8 }}>
                         {new Date(m.measurement_date).toLocaleString('es-PA')}
                       </div>
-                      <div style={{ overflowX: 'auto' }}>
-                        <table className="data-table">
-                          <thead>
-                            <tr>
-                                <th>Servicio</th>
-                                <th>Medida</th>
-                                <th>Descripción</th>
-                                <th>Nominal</th>
-                                <th>Tolerancia</th>
-                                <th>X1</th>
-                                <th>Y1</th>
-                                <th>Unidad</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {housings.map((hm) => (
-                                <tr key={hm.housing_id}>
-                                  <td style={{ maxWidth: 240 }}>{serviceLabelForMeasurementRow(hm)}</td>
-                                  <td>{hm.measure_code}</td>
-                                  <td>{hm.housing_description || '-'}</td>
-                                  <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
-                                  <td>{hm.tolerance || '-'}</td>
-                                  <td>{hm.x1 ?? '-'}</td>
-                                  <td>{hm.y1 ?? '-'}</td>
-                                  <td>{hm.unit || '-'}</td>
-                                </tr>
-                              ))}
-                          </tbody>
-                        </table>
-                      </div>
+                      {renderHousingMeasurementsRead(housings)}
                       <div style={{ marginTop: 8 }}>
                         <strong>Observaciones:</strong> {m.notes || '-'}
                       </div>
@@ -607,36 +682,7 @@ export default function TechnicianWorkOrderDetail() {
                       <div style={{ fontWeight: 600, marginBottom: 8 }}>
                         {new Date(m.measurement_date).toLocaleString('es-PA')}
                       </div>
-                      <div style={{ overflowX: 'auto' }}>
-                        <table className="data-table">
-                          <thead>
-                            <tr>
-                                <th>Servicio</th>
-                                <th>Medida</th>
-                                <th>Descripción</th>
-                                <th>Nominal</th>
-                                <th>Tolerancia</th>
-                                <th>X1</th>
-                                <th>Y1</th>
-                                <th>Unidad</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {housings.map((hm) => (
-                                <tr key={hm.housing_id}>
-                                  <td style={{ maxWidth: 240 }}>{serviceLabelForMeasurementRow(hm)}</td>
-                                  <td>{hm.measure_code}</td>
-                                  <td>{hm.housing_description || '-'}</td>
-                                  <td>{hm.nominal_value !== null && hm.nominal_value !== undefined ? `${hm.nominal_value} ${hm.nominal_unit || ''}` : '-'}</td>
-                                  <td>{hm.tolerance || '-'}</td>
-                                  <td>{hm.x1 ?? '-'}</td>
-                                  <td>{hm.y1 ?? '-'}</td>
-                                  <td>{hm.unit || '-'}</td>
-                                </tr>
-                              ))}
-                          </tbody>
-                        </table>
-                      </div>
+                      {renderHousingMeasurementsRead(housings)}
                       <div style={{ marginTop: 8 }}>
                         <strong>Observaciones:</strong> {m.notes || '-'}
                       </div>
@@ -931,8 +977,8 @@ export default function TechnicianWorkOrderDetail() {
       )}
 
       {showMeasurementModal && (
-        <div className="modal-overlay" onClick={() => setShowMeasurementModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay modal-overlay--measurement-sheet" onClick={() => setShowMeasurementModal(false)}>
+          <div className="modal-content modal-content--measurement" onClick={(e) => e.stopPropagation()}>
             <h2>Agregar Medición</h2>
             <form onSubmit={handleMeasurementSubmit}>
               <select
@@ -945,70 +991,145 @@ export default function TechnicianWorkOrderDetail() {
               </select>
 
               {serviceHousings && serviceHousings.length > 0 ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Servicio</th>
-                        <th>Medida</th>
-                        <th>Descripción</th>
-                        <th>Nominal</th>
-                        <th>Tolerancia</th>
-                        <th>X1</th>
-                        <th>Y1</th>
-                        <th>Unidad</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {serviceHousings.map((h, idx) => {
-                        const row = measurementData.housingMeasurements?.find(r => r.housingId === h.id) || { housingId: h.id, x1: '', y1: '', unit: '' };
-                        return (
-                          <tr key={h.id}>
-                            <td style={{ maxWidth: 200 }}>{serviceLabelForMeasurementRow(h)}</td>
-                            <td style={{ fontWeight: 700 }}>{h.measure_code}</td>
-                            <td>{h.description || '-'}</td>
-                            <td>{h.nominal_value !== null && h.nominal_value !== undefined ? `${h.nominal_value} ${h.nominal_unit || ''}` : '-'}</td>
-                            <td>{h.tolerance || '-'}</td>
-                            <td>
-                              <input
-                                type="number"
-                                step="0.001"
-                                value={row.x1}
-                                onChange={(e) => {
-                                  const next = measurementData.housingMeasurements.map(r => r.housingId === h.id ? { ...r, x1: e.target.value } : r);
-                                  setMeasurementData({ ...measurementData, housingMeasurements: next });
-                                }}
-                                placeholder="0.000"
-                              />
-                            </td>
-                            <td>
-                              <input
-                                type="number"
-                                step="0.001"
-                                value={row.y1}
-                                onChange={(e) => {
-                                  const next = measurementData.housingMeasurements.map(r => r.housingId === h.id ? { ...r, y1: e.target.value } : r);
-                                  setMeasurementData({ ...measurementData, housingMeasurements: next });
-                                }}
-                                placeholder="0.000"
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={row.unit}
-                                onChange={(e) => {
-                                  const next = measurementData.housingMeasurements.map(r => r.housingId === h.id ? { ...r, unit: e.target.value } : r);
-                                  setMeasurementData({ ...measurementData, housingMeasurements: next });
-                                }}
-                                placeholder="mm, in, etc."
-                              />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                compactMeasurementsLayout ? (
+                  <div className="technician-housing-cards technician-housing-cards--form">
+                    {serviceHousings.map((h) => {
+                      const row = measurementData.housingMeasurements?.find((r) => r.housingId === h.id) || { housingId: h.id, x1: '', y1: '', unit: '' };
+                      return (
+                        <div key={h.id} className="technician-housing-card technician-housing-card--form">
+                          <div className="technician-housing-card__row">
+                            <span className="technician-housing-card__label">Servicio</span>
+                            <span className="technician-housing-card__value">{serviceLabelForMeasurementRow(h)}</span>
+                          </div>
+                          <div className="technician-housing-card__row">
+                            <span className="technician-housing-card__label">Medida</span>
+                            <span className="technician-housing-card__value technician-housing-card__value--code">{h.measure_code}</span>
+                          </div>
+                          <div className="technician-housing-card__row">
+                            <span className="technician-housing-card__label">Descripción</span>
+                            <span className="technician-housing-card__value">{h.description || '—'}</span>
+                          </div>
+                          <div className="technician-housing-card__row technician-housing-card__row--inline">
+                            <div>
+                              <span className="technician-housing-card__label">Nominal</span>
+                              <span className="technician-housing-card__value">{formatNominalDisplay(h)}</span>
+                            </div>
+                            <div>
+                              <span className="technician-housing-card__label">Tolerancia</span>
+                              <span className="technician-housing-card__value">{h.tolerance ?? '—'}</span>
+                            </div>
+                          </div>
+                          <div className="technician-housing-card__field">
+                            <label htmlFor={`m-x1-${h.id}`}>X1</label>
+                            <input
+                              id={`m-x1-${h.id}`}
+                              type="number"
+                              step="0.001"
+                              value={row.x1}
+                              onChange={(e) => {
+                                const next = measurementData.housingMeasurements.map((r) => (r.housingId === h.id ? { ...r, x1: e.target.value } : r));
+                                setMeasurementData({ ...measurementData, housingMeasurements: next });
+                              }}
+                              placeholder="0.000"
+                            />
+                          </div>
+                          <div className="technician-housing-card__field">
+                            <label htmlFor={`m-y1-${h.id}`}>Y1</label>
+                            <input
+                              id={`m-y1-${h.id}`}
+                              type="number"
+                              step="0.001"
+                              value={row.y1}
+                              onChange={(e) => {
+                                const next = measurementData.housingMeasurements.map((r) => (r.housingId === h.id ? { ...r, y1: e.target.value } : r));
+                                setMeasurementData({ ...measurementData, housingMeasurements: next });
+                              }}
+                              placeholder="0.000"
+                            />
+                          </div>
+                          <div className="technician-housing-card__field">
+                            <label htmlFor={`m-unit-${h.id}`}>Unidad</label>
+                            <input
+                              id={`m-unit-${h.id}`}
+                              value={row.unit}
+                              onChange={(e) => {
+                                const next = measurementData.housingMeasurements.map((r) => (r.housingId === h.id ? { ...r, unit: e.target.value } : r));
+                                setMeasurementData({ ...measurementData, housingMeasurements: next });
+                              }}
+                              placeholder="mm, in, etc."
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="technician-measurement-table-wrap">
+                    <p className="technician-measure-scroll-hint">Deslice horizontalmente para ver todas las columnas.</p>
+                    <table className="technician-measurement-table">
+                      <thead>
+                        <tr>
+                          <th>Servicio</th>
+                          <th>Medida</th>
+                          <th>Descripción</th>
+                          <th>Nominal</th>
+                          <th>Tolerancia</th>
+                          <th>X1</th>
+                          <th>Y1</th>
+                          <th>Unidad</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {serviceHousings.map((h) => {
+                          const row = measurementData.housingMeasurements?.find((r) => r.housingId === h.id) || { housingId: h.id, x1: '', y1: '', unit: '' };
+                          return (
+                            <tr key={h.id}>
+                              <td>{serviceLabelForMeasurementRow(h)}</td>
+                              <td style={{ fontWeight: 700 }}>{h.measure_code}</td>
+                              <td>{h.description || '-'}</td>
+                              <td>{h.nominal_value !== null && h.nominal_value !== undefined ? `${h.nominal_value} ${h.nominal_unit || ''}`.trim() : '-'}</td>
+                              <td>{h.tolerance || '-'}</td>
+                              <td>
+                                <input
+                                  type="number"
+                                  step="0.001"
+                                  value={row.x1}
+                                  onChange={(e) => {
+                                    const next = measurementData.housingMeasurements.map((r) => (r.housingId === h.id ? { ...r, x1: e.target.value } : r));
+                                    setMeasurementData({ ...measurementData, housingMeasurements: next });
+                                  }}
+                                  placeholder="0.000"
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  step="0.001"
+                                  value={row.y1}
+                                  onChange={(e) => {
+                                    const next = measurementData.housingMeasurements.map((r) => (r.housingId === h.id ? { ...r, y1: e.target.value } : r));
+                                    setMeasurementData({ ...measurementData, housingMeasurements: next });
+                                  }}
+                                  placeholder="0.000"
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  value={row.unit}
+                                  onChange={(e) => {
+                                    const next = measurementData.housingMeasurements.map((r) => (r.housingId === h.id ? { ...r, unit: e.target.value } : r));
+                                    setMeasurementData({ ...measurementData, housingMeasurements: next });
+                                  }}
+                                  placeholder="mm, in, etc."
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
               ) : (
                 <p className="empty-message">Esta orden no tiene alojamientos configurados.</p>
               )}
