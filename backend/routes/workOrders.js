@@ -60,6 +60,18 @@ function completionBeforeStartError(effStart, effCompletion) {
   return null;
 }
 
+const MACHINING_SERVICE_TYPE_LABEL = 'Reparación por Mecanizado';
+function normalizeServiceTypeName(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+function isMachiningRepairTypeName(name) {
+  return normalizeServiceTypeName(name) === normalizeServiceTypeName(MACHINING_SERVICE_TYPE_LABEL);
+}
+
 /**
  * Si existe una medición inicial (la más antigua), enlaza alojamientos de la OT que aún no tengan fila.
  * Así, servicios agregados después aparecen en Mediciones Iniciales (X1/Y1 vacíos hasta completarlos).
@@ -85,6 +97,97 @@ async function linkNewHousingsToInitialMeasurement(pool, workOrderId) {
        )`,
     [initialMeasurementId, workOrderId, initialMeasurementId]
   );
+}
+
+const SHIFT_DAY = 'day';
+const SHIFT_NIGHT = 'night';
+
+function normalizeShift(raw) {
+  const s = String(raw || '').toLowerCase();
+  if (s === SHIFT_NIGHT || s === 'ns' || s === 'noche') return SHIFT_NIGHT;
+  return SHIFT_DAY;
+}
+
+/** Acceso técnico: asignación legacy en la OT o fila en work_order_service_technicians */
+async function technicianHasAccessToWorkOrder(pool, workOrderId, userId) {
+  if (!userId || !workOrderId) return false;
+  const [legacy] = await pool.query(
+    'SELECT 1 FROM work_orders WHERE id = ? AND assigned_technician_id = ? LIMIT 1',
+    [workOrderId, userId]
+  );
+  if (legacy.length > 0) return true;
+  const [j] = await pool.query(
+    `SELECT 1 FROM work_order_service_technicians wost
+     INNER JOIN work_order_services wos ON wost.work_order_service_id = wos.id
+     WHERE wos.work_order_id = ? AND wost.technician_id = ? LIMIT 1`,
+    [workOrderId, userId]
+  );
+  return j.length > 0;
+}
+
+async function assertTechnicianWorkOrderAccess(pool, workOrderId, user) {
+  if (!user || user.role === 'admin') return;
+  const ok = await technicianHasAccessToWorkOrder(pool, workOrderId, user.id);
+  if (!ok) {
+    const err = new Error('Access denied');
+    err.statusCode = 403;
+    throw err;
+  }
+}
+
+async function validateTechnicianUserIds(pool, ids) {
+  const uniq = [...new Set((ids || []).filter((id) => id != null && id !== '').map((id) => parseInt(id, 10)))].filter((n) => !Number.isNaN(n));
+  if (uniq.length === 0) return { ok: true, ids: [] };
+  const [rows] = await pool.query(
+    'SELECT id FROM users WHERE id IN (?) AND role = ? AND is_active = TRUE',
+    [uniq, 'technician']
+  );
+  return { ok: rows.length === uniq.length, ids: uniq };
+}
+
+async function syncServiceTechnicians(pool, workOrderServiceId, techniciansPayload) {
+  await pool.query('DELETE FROM work_order_service_technicians WHERE work_order_service_id = ?', [workOrderServiceId]);
+  const list = Array.isArray(techniciansPayload) ? techniciansPayload : [];
+  const seen = new Set();
+  for (const t of list) {
+    const tid = t.technicianId ?? t.technician_id;
+    if (tid == null || tid === '') continue;
+    const shift = normalizeShift(t.shift);
+    const key = `${tid}:${shift}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await pool.query(
+      `INSERT INTO work_order_service_technicians (work_order_service_id, technician_id, shift) VALUES (?, ?, ?)`,
+      [workOrderServiceId, parseInt(tid, 10), shift]
+    );
+  }
+}
+
+async function attachTechniciansToOrderServices(pool, orderServices) {
+  const wosIds = (orderServices || []).map((s) => s.id).filter(Boolean);
+  if (wosIds.length === 0) return;
+  try {
+    const [techRows] = await pool.query(
+      `SELECT wost.work_order_service_id, wost.technician_id, wost.shift, u.full_name AS technician_name
+       FROM work_order_service_technicians wost
+       JOIN users u ON wost.technician_id = u.id
+       WHERE wost.work_order_service_id IN (?)
+       ORDER BY u.full_name`,
+      [wosIds]
+    );
+    (orderServices || []).forEach((svc) => {
+      if (!svc.id) return;
+      svc.technicians = (techRows || [])
+        .filter((r) => r.work_order_service_id === svc.id)
+        .map((r) => ({
+          technician_id: r.technician_id,
+          full_name: r.technician_name,
+          shift: r.shift
+        }));
+    });
+  } catch (e) {
+    console.warn('attachTechniciansToOrderServices:', e.message);
+  }
 }
 
 // Configure multer for file uploads
@@ -129,7 +232,8 @@ router.get('/', authenticateToken, async (req, res) => {
         CONCAT(eb.name, ' ', em.model_name, ' - ', e.serial_number) as equipment_name,
         em.model_name,
         eb.name as brand_name,
-        u.full_name as technician_name,
+        COALESCE(svc_techs.tech_names, u.full_name) as technician_name,
+        svc_techs.tech_ids_csv as service_technician_ids,
         creator.full_name as created_by_name
       FROM work_orders wo
       LEFT JOIN clients c ON wo.client_id = c.id
@@ -138,13 +242,29 @@ router.get('/', authenticateToken, async (req, res) => {
       LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
       LEFT JOIN users u ON wo.assigned_technician_id = u.id
       LEFT JOIN users creator ON wo.created_by = creator.id
+      LEFT JOIN (
+        SELECT wos.work_order_id,
+          GROUP_CONCAT(DISTINCT CONCAT(u2.full_name, ' (', IF(wost.shift = 'night', 'Noche/NS', 'Día/DS'), ')') ORDER BY u2.full_name SEPARATOR ', ') AS tech_names,
+          GROUP_CONCAT(DISTINCT wost.technician_id ORDER BY wost.technician_id SEPARATOR ',') AS tech_ids_csv
+        FROM work_order_service_technicians wost
+        INNER JOIN work_order_services wos ON wost.work_order_service_id = wos.id
+        INNER JOIN users u2 ON wost.technician_id = u2.id
+        GROUP BY wos.work_order_id
+      ) svc_techs ON svc_techs.work_order_id = wo.id
     `;
     
     const params = [];
     
     if (req.user.role === 'technician') {
-      query += ' WHERE wo.assigned_technician_id = ?';
-      params.push(req.user.id);
+      query += ` WHERE (
+        wo.assigned_technician_id = ?
+        OR EXISTS (
+          SELECT 1 FROM work_order_service_technicians wost2
+          INNER JOIN work_order_services wos2 ON wost2.work_order_service_id = wos2.id
+          WHERE wos2.work_order_id = wo.id AND wost2.technician_id = ?
+        )
+      )`;
+      params.push(req.user.id, req.user.id);
     }
     
     query += ' ORDER BY wo.created_at DESC';
@@ -171,7 +291,7 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
         e.serial_number, e.description as equipment_description,
         CONCAT(eb.name, ' ', em.model_name, ' - ', e.serial_number) as equipment_name,
         em.model_name, em.components as equipment_components, eb.name as brand_name, eb.id as brand_id, em.id as model_id,
-        u.full_name as technician_name, u.phone as technician_phone, creator.full_name as created_by_name
+        COALESCE(svc_techs.tech_names, u.full_name) as technician_name, u.phone as technician_phone, creator.full_name as created_by_name
       FROM work_orders wo
       LEFT JOIN clients c ON wo.client_id = c.id
       LEFT JOIN equipment e ON wo.equipment_id = e.id
@@ -179,6 +299,14 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
       LEFT JOIN users u ON wo.assigned_technician_id = u.id
       LEFT JOIN users creator ON wo.created_by = creator.id
+      LEFT JOIN (
+        SELECT wos.work_order_id,
+          GROUP_CONCAT(DISTINCT CONCAT(u2.full_name, ' (', IF(wost.shift = 'night', 'Noche/NS', 'Día/DS'), ')') ORDER BY u2.full_name SEPARATOR ', ') AS tech_names
+        FROM work_order_service_technicians wost
+        INNER JOIN work_order_services wos ON wost.work_order_service_id = wos.id
+        INNER JOIN users u2 ON wost.technician_id = u2.id
+        GROUP BY wos.work_order_id
+      ) svc_techs ON svc_techs.work_order_id = wo.id
       WHERE wo.id = ?
     `, [workOrderId]);
 
@@ -187,8 +315,11 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
     }
     const order = orders[0];
 
-    if (req.user.role === 'technician' && order.assigned_technician_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+    try {
+      await assertTechnicianWorkOrderAccess(pool, workOrderId, req.user);
+    } catch (e) {
+      if (e.statusCode === 403) return res.status(403).json({ error: 'Access denied' });
+      throw e;
     }
 
     const reportAllowedStatuses = new Set(['completed', 'accepted']);
@@ -210,6 +341,7 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       WHERE wos.work_order_id = ? ORDER BY wos.id
     `, [workOrderId]);
     let orderServices = wosRows || [];
+    await attachTechniciansToOrderServices(pool, orderServices);
     if (orderServices.length === 0 && order.service_id) {
       const [legacy] = await pool.query(
         'SELECT id, name as service_name, code as service_code, description as service_description FROM services WHERE id = ?',
@@ -278,7 +410,21 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       };
     });
 
-    const [photos] = await pool.query('SELECT * FROM work_order_photos WHERE work_order_id = ? ORDER BY created_at', [workOrderId]);
+    let photos = [];
+    try {
+      const [photoRows] = await pool.query(
+        `SELECT p.*, wos.service_id AS photo_service_id, s.name AS photo_service_name, s.code AS photo_service_code
+         FROM work_order_photos p
+         LEFT JOIN work_order_services wos ON p.work_order_service_id = wos.id
+         LEFT JOIN services s ON wos.service_id = s.id
+         WHERE p.work_order_id = ? ORDER BY p.created_at`,
+        [workOrderId]
+      );
+      photos = photoRows || [];
+    } catch (_) {
+      const [fb] = await pool.query('SELECT * FROM work_order_photos WHERE work_order_id = ? ORDER BY created_at', [workOrderId]);
+      photos = fb || [];
+    }
 
     let conformityCapataz = null;
     let conformitySuperintendente = null;
@@ -383,8 +529,9 @@ router.get('/:id/documents/:documentId/file', authenticateToken, async (req, res
     }
     const wo = orders[0];
 
-    if (req.user.role === 'technician' && Number(wo.assigned_technician_id) !== Number(req.user.id)) {
-      return res.status(403).json({ error: 'Acceso denegado' });
+    if (req.user.role === 'technician') {
+      const ok = await technicianHasAccessToWorkOrder(pool, workOrderId, req.user.id);
+      if (!ok) return res.status(403).json({ error: 'Acceso denegado' });
     }
 
     const isVisibleToTechnician = (v) => {
@@ -505,7 +652,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
         em.id as model_id,
         loc.name as location_name,
         st.name as service_type_name,
-        u.full_name as technician_name,
+        COALESCE(svc_techs.tech_names, u.full_name) as technician_name,
         u.phone as technician_phone,
         creator.full_name as created_by_name
       FROM work_orders wo
@@ -517,6 +664,14 @@ router.get('/:id', authenticateToken, async (req, res) => {
       LEFT JOIN service_types st ON wo.service_type_id = st.id
       LEFT JOIN users u ON wo.assigned_technician_id = u.id
       LEFT JOIN users creator ON wo.created_by = creator.id
+      LEFT JOIN (
+        SELECT wos.work_order_id,
+          GROUP_CONCAT(DISTINCT CONCAT(u2.full_name, ' (', IF(wost.shift = 'night', 'Noche/NS', 'Día/DS'), ')') ORDER BY u2.full_name SEPARATOR ', ') AS tech_names
+        FROM work_order_service_technicians wost
+        INNER JOIN work_order_services wos ON wost.work_order_service_id = wos.id
+        INNER JOIN users u2 ON wost.technician_id = u2.id
+        GROUP BY wos.work_order_id
+      ) svc_techs ON svc_techs.work_order_id = wo.id
       WHERE wo.id = ?
     `, [req.params.id]);
     
@@ -525,6 +680,13 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
     
     const order = orders[0];
+
+    try {
+      await assertTechnicianWorkOrderAccess(pool, parseInt(req.params.id, 10), req.user);
+    } catch (e) {
+      if (e.statusCode === 403) return res.status(403).json({ error: 'Access denied' });
+      throw e;
+    }
 
     // Get work order services (múltiples servicios por OT)
     let orderServices = [];
@@ -537,6 +699,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
         ORDER BY wos.id
       `, [req.params.id]);
       orderServices = wosRows || [];
+      await attachTechniciansToOrderServices(pool, orderServices);
     } catch (err) {
       console.error('Error fetching work order services:', err);
     }
@@ -549,11 +712,6 @@ router.get('/:id', authenticateToken, async (req, res) => {
       if (legacy.length > 0) {
         orderServices = [{ service_id: order.service_id, housing_count: order.service_housing_count || 0, ...legacy[0] }];
       }
-    }
-    
-    // Check permissions
-    if (req.user.role === 'technician' && order.assigned_technician_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
     }
     
     // Get measurements (initial and final) — ensure work_order_id is integer for consistent query
@@ -643,11 +801,25 @@ router.get('/:id', authenticateToken, async (req, res) => {
       };
     });
     
-    // Get photos
-    const [photos] = await pool.query(
-      'SELECT * FROM work_order_photos WHERE work_order_id = ? ORDER BY created_at',
-      [req.params.id]
-    );
+    // Get photos (con servicio asociado si existe)
+    let photos = [];
+    try {
+      const [photoRows] = await pool.query(
+        `SELECT p.*, wos.service_id AS photo_service_id, s.name AS photo_service_name, s.code AS photo_service_code
+         FROM work_order_photos p
+         LEFT JOIN work_order_services wos ON p.work_order_service_id = wos.id
+         LEFT JOIN services s ON wos.service_id = s.id
+         WHERE p.work_order_id = ? ORDER BY p.created_at`,
+        [req.params.id]
+      );
+      photos = photoRows || [];
+    } catch (pe) {
+      const [fallback] = await pool.query(
+        'SELECT * FROM work_order_photos WHERE work_order_id = ? ORDER BY created_at',
+        [req.params.id]
+      );
+      photos = fallback || [];
+    }
     
     // Get observations
     const [observations] = await pool.query(`
@@ -771,20 +943,37 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create work order
 router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE', 'work_order'), async (req, res) => {
   try {
-    const { clientId, equipmentId, services, serviceLocation, locationId, serviceTypeId, clientServiceOrderNumber, title, description, priority, scheduledDate, assignedTechnicianId } = req.body;
+    const { clientId, equipmentId, services, serviceLocation, locationId, serviceTypeId, clientServiceOrderNumber, title, description, priority, scheduledDate } = req.body;
     
     if (!clientId || !equipmentId || !title) {
       return res.status(400).json({ error: 'Client, equipment, and title are required' });
     }
 
-    // services: [{ serviceId, housingCount, housings: [{ measureCode, description, ... }] }] - housings por servicio
-    const servicesList = Array.isArray(services) && services.length > 0
+    // services: [{ serviceId, housingCount, housings, technicians: [{ technicianId, shift }] }]
+    let servicesList = Array.isArray(services) && services.length > 0
       ? services.filter(s => s.serviceId)
       : [];
-    const totalHousingCount = servicesList.reduce((sum, s) => sum + (Array.isArray(s.housings) ? s.housings.length : 0), 0);
-    
+
     const pool = await getConnection();
-    
+
+    if (servicesList.length > 0) {
+      const allTechIds = [];
+      for (const s of servicesList) {
+        const techList = Array.isArray(s.technicians) ? s.technicians : [];
+        const ids = techList.map((t) => t.technicianId ?? t.technician_id).filter((x) => x !== '' && x != null);
+        if (ids.length === 0) {
+          return res.status(400).json({
+            error: 'Cada servicio debe tener al menos un técnico asignado (turno Día/DS o Noche/NS).'
+          });
+        }
+        allTechIds.push(...ids.map((x) => parseInt(x, 10)));
+      }
+      const v = await validateTechnicianUserIds(pool, allTechIds);
+      if (!v.ok) {
+        return res.status(400).json({ error: 'Uno o más técnicos no son válidos o no están activos.' });
+      }
+    }
+
     // Resolve service_location: use location name when locationId is set, else use provided text
     let resolvedServiceLocation = serviceLocation || null;
     const locId = locationId !== undefined && locationId !== null && locationId !== '' ? parseInt(locationId, 10) : null;
@@ -793,6 +982,22 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
       const [locRows] = await pool.query('SELECT name FROM locations WHERE id = ?', [locId]);
       if (locRows.length > 0) resolvedServiceLocation = locRows[0].name;
     }
+
+    let housingsAllowedForMachining = false;
+    if (stId) {
+      const [stRows] = await pool.query('SELECT name FROM service_types WHERE id = ?', [stId]);
+      if (stRows.length > 0) housingsAllowedForMachining = isMachiningRepairTypeName(stRows[0].name);
+    }
+    if (!housingsAllowedForMachining) {
+      servicesList = servicesList.map((s) => ({ ...s, housingCount: 0, housings: [] }));
+    }
+
+    const totalHousingCount = servicesList.reduce((sum, s) => sum + (Array.isArray(s.housings) ? s.housings.length : 0), 0);
+
+    const hasServiceTechs = servicesList.some(
+      (s) => Array.isArray(s.technicians) && s.technicians.some((t) => t.technicianId ?? t.technician_id)
+    );
+    const initialStatus = hasServiceTechs ? 'assigned' : 'created';
 
     // Generate order number
     const [count] = await pool.query('SELECT COUNT(*) as count FROM work_orders');
@@ -808,13 +1013,13 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
       resolvedServiceLocation,
       clientServiceOrderNumber || null,
       totalHousingCount,
-      assignedTechnicianId || null,
+      null,
       title,
       description || null,
       priority || 'medium',
       scheduledDate || null,
       req.user.id,
-      assignedTechnicianId ? 'assigned' : 'created'
+      initialStatus
     ];
     let result;
     try {
@@ -826,7 +1031,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
       );
     } catch (woErr) {
       if (woErr.code === 'ER_BAD_FIELD_ERROR' && woErr.sqlMessage && (woErr.sqlMessage.includes('service_type_id') || woErr.sqlMessage.includes('location_id'))) {
-        const legacyValues = [orderNumber, clientId, equipmentId, resolvedServiceLocation, clientServiceOrderNumber || null, totalHousingCount, assignedTechnicianId || null, title, description || null, priority || 'medium', scheduledDate || null, req.user.id, assignedTechnicianId ? 'assigned' : 'created'];
+        const legacyValues = [orderNumber, clientId, equipmentId, resolvedServiceLocation, clientServiceOrderNumber || null, totalHousingCount, null, title, description || null, priority || 'medium', scheduledDate || null, req.user.id, initialStatus];
         [result] = await pool.query(
           `INSERT INTO work_orders 
            (order_number, client_id, equipment_id, service_location, client_service_order_number, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
@@ -838,7 +1043,7 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
           `INSERT INTO work_orders 
            (order_number, client_id, equipment_id, service_type_id, location_id, service_location, service_housing_count, assigned_technician_id, title, description, priority, scheduled_date, created_by, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [orderNumber, clientId, equipmentId, stId, locId, resolvedServiceLocation, totalHousingCount, assignedTechnicianId || null, title, description || null, priority || 'medium', scheduledDate || null, req.user.id, assignedTechnicianId ? 'assigned' : 'created']
+          [orderNumber, clientId, equipmentId, stId, locId, resolvedServiceLocation, totalHousingCount, null, title, description || null, priority || 'medium', scheduledDate || null, req.user.id, initialStatus]
         );
       } else {
         throw woErr;
@@ -854,6 +1059,12 @@ router.post('/', authenticateToken, requireRole('admin'), activityLogger('CREATE
           [result.insertId, s.serviceId, housingCount]
         );
         const wosId = wosRes.insertId;
+        try {
+          await syncServiceTechnicians(pool, wosId, s.technicians);
+        } catch (syncErr) {
+          console.error('syncServiceTechnicians (create):', syncErr);
+          return res.status(500).json({ error: 'No se pudo guardar la asignación de técnicos por servicio.' });
+        }
         const housings = Array.isArray(s.housings) ? s.housings : [];
         if (housings.length > 0) {
           const hasMeasureCode = (h) => (h.measureCode || h.measure_code || '').toString().trim();
@@ -924,8 +1135,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
     
     // Technicians can only update status and start/completion dates
     if (req.user.role === 'technician') {
-      if (order.assigned_technician_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
+      try {
+        await assertTechnicianWorkOrderAccess(pool, parseInt(req.params.id, 10), req.user);
+      } catch (e) {
+        if (e.statusCode === 403) return res.status(403).json({ error: 'Access denied' });
+        throw e;
       }
       
       const updateFields = [];
@@ -998,6 +1212,39 @@ router.put('/:id', authenticateToken, async (req, res) => {
     // Update work_order_services y housings (múltiples servicios por OT)
     // No reemplazar servicios/alojamientos si ya hay mediciones tomadas (evitar perder work_order_housing_measurements)
     if (services !== undefined && Array.isArray(services)) {
+      let effTypeIdForHousings =
+        serviceTypeId !== undefined
+          ? (serviceTypeId !== null && serviceTypeId !== '' ? parseInt(serviceTypeId, 10) : null)
+          : (order.service_type_id != null ? Number(order.service_type_id) : null);
+      let housingsAllowedForMachining = false;
+      if (effTypeIdForHousings) {
+        const [stRows] = await pool.query('SELECT name FROM service_types WHERE id = ?', [effTypeIdForHousings]);
+        if (stRows.length > 0) housingsAllowedForMachining = isMachiningRepairTypeName(stRows[0].name);
+      }
+      const normalizeServicesPayload = (list) =>
+        housingsAllowedForMachining
+          ? list
+          : list.map((s) => ({ ...s, housingCount: 0, housings: [] }));
+
+      const servicesListNormalized = normalizeServicesPayload(services.filter((s) => s && s.serviceId));
+      if (servicesListNormalized.length > 0) {
+        const allTechIds = [];
+        for (const s of servicesListNormalized) {
+          const techList = Array.isArray(s.technicians) ? s.technicians : [];
+          const ids = techList.map((t) => t.technicianId ?? t.technician_id).filter((x) => x !== '' && x != null);
+          if (ids.length === 0) {
+            return res.status(400).json({
+              error: 'Cada servicio debe tener al menos un técnico asignado (turno Día/DS o Noche/NS).'
+            });
+          }
+          allTechIds.push(...ids.map((x) => parseInt(x, 10)));
+        }
+        const v = await validateTechnicianUserIds(pool, allTechIds);
+        if (!v.ok) {
+          return res.status(400).json({ error: 'Uno o más técnicos no son válidos o no están activos.' });
+        }
+      }
+
       const [measCount] = await pool.query('SELECT COUNT(*) AS c FROM measurements WHERE work_order_id = ?', [req.params.id]);
       if ((measCount[0]?.c || 0) > 0) {
         // Hay mediciones: no borrar filas (FK desde work_order_housing_measurements).
@@ -1009,7 +1256,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         );
         const wosByServiceId = new Map(existingWos.map((r) => [Number(r.service_id), r]));
 
-        const servicesList = services.filter((s) => s && s.serviceId);
+        const servicesList = servicesListNormalized;
         for (const s of servicesList) {
           const sid = Number(s.serviceId);
           const housingCount = Number(s.housingCount) || 0;
@@ -1027,6 +1274,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
             );
             wosId = ins.insertId;
           }
+
+          await syncServiceTechnicians(pool, wosId, s.technicians);
 
           for (const h of housings) {
             const code = (h.measureCode || h.measure_code || '').toString().trim();
@@ -1115,13 +1364,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
         }
       } else {
         await pool.query('DELETE FROM work_order_services WHERE work_order_id = ?', [req.params.id]);
-        const servicesList = services.filter((s) => s && s.serviceId);
+        const servicesList = servicesListNormalized;
         for (const s of servicesList) {
           const housingCount = Number(s.housingCount) || 0;
           const [wosRes] = await pool.query(
             'INSERT INTO work_order_services (work_order_id, service_id, housing_count) VALUES (?, ?, ?)',
             [req.params.id, s.serviceId, housingCount]
           );
+          await syncServiceTechnicians(pool, wosRes.insertId, s.technicians);
           const housings = Array.isArray(s.housings) ? s.housings : [];
           if (housings.length > 0) {
             const values = housings.map((h) => ([
@@ -1298,8 +1548,9 @@ router.post('/:id/measurements', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Work order not found' });
     }
     
-    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician') {
+      const ok = await technicianHasAccessToWorkOrder(pool, parseInt(req.params.id, 10), req.user.id);
+      if (!ok) return res.status(403).json({ error: 'Access denied' });
     }
     
     const [result] = await pool.query(
@@ -1424,30 +1675,81 @@ router.post('/:id/photos', authenticateToken, upload.single('photo'), async (req
       return res.status(400).json({ error: 'Photo file is required' });
     }
     
-    const { photoType, description } = req.body;
+    const { photoType, description, workOrderServiceId } = req.body;
     const pool = await getConnection();
+    const woIdInt = parseInt(req.params.id, 10);
     
     // Check permissions
-    const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
+    const [orders] = await pool.query('SELECT id FROM work_orders WHERE id = ?', [req.params.id]);
     if (orders.length === 0) {
       return res.status(404).json({ error: 'Work order not found' });
     }
     
-    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician') {
+      const ok = await technicianHasAccessToWorkOrder(pool, woIdInt, req.user.id);
+      if (!ok) return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const [svcCountRows] = await pool.query(
+      'SELECT COUNT(*) AS c FROM work_order_services WHERE work_order_id = ?',
+      [woIdInt]
+    );
+    const svcCount = svcCountRows[0]?.c || 0;
+    const rawWos = workOrderServiceId ?? req.body.work_order_service_id;
+    let wosIdVal = null;
+    if (rawWos !== undefined && rawWos !== null && String(rawWos).trim() !== '') {
+      const wosParsed = parseInt(String(rawWos), 10);
+      const [wosRows] = await pool.query(
+        'SELECT id FROM work_order_services WHERE id = ? AND work_order_id = ?',
+        [wosParsed, woIdInt]
+      );
+      if (wosRows.length === 0) {
+        return res.status(400).json({ error: 'El servicio seleccionado no pertenece a esta orden.' });
+      }
+      wosIdVal = wosParsed;
+    }
+    if (svcCount > 1 && wosIdVal == null) {
+      return res.status(400).json({ error: 'Seleccione el servicio al que corresponde la foto.' });
+    }
+    if (svcCount === 1 && wosIdVal == null) {
+      const [one] = await pool.query(
+        'SELECT id FROM work_order_services WHERE work_order_id = ? ORDER BY id LIMIT 1',
+        [woIdInt]
+      );
+      if (one.length > 0) wosIdVal = one[0].id;
     }
     
-    const [result] = await pool.query(
-      `INSERT INTO work_order_photos (work_order_id, photo_path, photo_type, description, uploaded_by)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        req.params.id,
-        `/uploads/photos/${req.file.filename}`,
-        photoType || 'during_service',
-        description || null,
-        req.user.id
-      ]
-    );
+    let result;
+    try {
+      [result] = await pool.query(
+        `INSERT INTO work_order_photos (work_order_id, work_order_service_id, photo_path, photo_type, description, uploaded_by)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          req.params.id,
+          wosIdVal,
+          `/uploads/photos/${req.file.filename}`,
+          photoType || 'during_service',
+          description || null,
+          req.user.id
+        ]
+      );
+    } catch (insErr) {
+      if (insErr.code === 'ER_BAD_FIELD_ERROR' && insErr.sqlMessage && insErr.sqlMessage.includes('work_order_service_id')) {
+        [result] = await pool.query(
+          `INSERT INTO work_order_photos (work_order_id, photo_path, photo_type, description, uploaded_by)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            req.params.id,
+            `/uploads/photos/${req.file.filename}`,
+            photoType || 'during_service',
+            description || null,
+            req.user.id
+          ]
+        );
+      } else {
+        throw insErr;
+      }
+    }
     
     await logActivity(req.user.id, 'CREATE', 'photo', result.insertId, 'Uploaded photo', req.ip);
     
@@ -1470,8 +1772,9 @@ router.delete('/:id/photos/:photoId', authenticateToken, async (req, res) => {
     if (orders.length === 0) {
       return res.status(404).json({ error: 'Work order not found' });
     }
-    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician') {
+      const ok = await technicianHasAccessToWorkOrder(pool, parseInt(req.params.id, 10), req.user.id);
+      if (!ok) return res.status(403).json({ error: 'Access denied' });
     }
     const [photos] = await pool.query(
       'SELECT id, photo_path FROM work_order_photos WHERE work_order_id = ? AND id = ?',
@@ -1512,8 +1815,9 @@ router.post('/:id/observations', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Work order not found' });
     }
     
-    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician') {
+      const ok = await technicianHasAccessToWorkOrder(pool, parseInt(req.params.id, 10), req.user.id);
+      if (!ok) return res.status(403).json({ error: 'Access denied' });
     }
     
     const [result] = await pool.query(
@@ -1583,8 +1887,9 @@ router.get('/:id/activity', authenticateToken, async (req, res) => {
     const pool = await getConnection();
     const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
     if (orders.length === 0) return res.status(404).json({ error: 'Work order not found' });
-    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician') {
+      const ok = await technicianHasAccessToWorkOrder(pool, parseInt(req.params.id, 10), req.user.id);
+      if (!ok) return res.status(403).json({ error: 'Access denied' });
     }
     const [logs] = await pool.query(`
       SELECT al.*, u.full_name as user_name
@@ -1671,8 +1976,9 @@ router.post('/:id/conformity-signature', authenticateToken, async (req, res) => 
     const pool = await getConnection();
     const [orders] = await pool.query('SELECT id, assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
     if (orders.length === 0) return res.status(404).json({ error: 'Work order not found' });
-    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician') {
+      const ok = await technicianHasAccessToWorkOrder(pool, parseInt(req.params.id, 10), req.user.id);
+      if (!ok) return res.status(403).json({ error: 'Access denied' });
     }
     await pool.query(
       `INSERT INTO work_order_conformity_signatures (work_order_id, signature_role, signature_data, signed_by_name)
@@ -1694,8 +2000,9 @@ router.get('/:id/conformity-signature', authenticateToken, async (req, res) => {
     const pool = await getConnection();
     const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
     if (orders.length === 0) return res.status(404).json({ error: 'Work order not found' });
-    if (req.user.role === 'technician' && orders[0].assigned_technician_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician') {
+      const ok = await technicianHasAccessToWorkOrder(pool, parseInt(req.params.id, 10), req.user.id);
+      if (!ok) return res.status(403).json({ error: 'Access denied' });
     }
     const [rows] = await pool.query(
       'SELECT id, signature_role, signature_data, signed_by_name, signed_at FROM work_order_conformity_signatures WHERE work_order_id = ?',

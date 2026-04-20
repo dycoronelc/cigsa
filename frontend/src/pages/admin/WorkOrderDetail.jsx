@@ -7,6 +7,8 @@ import { openWorkOrderDocumentInNewTab } from '../../utils/openWorkOrderDocument
 import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
 import SearchableSelect from '../../components/SearchableSelect';
+import { isMachiningRepairByTypeName, isMachiningRepairServiceType } from '../../utils/serviceTypeHousings';
+import { SHIFT_DAY, SHIFT_NIGHT, shiftLabel } from '../../utils/serviceTechnicianShift';
 import './WorkOrderDetail.css';
 
 /** Estados en los que se permite generar el reporte PDF (cabecera usa fecha de completación). */
@@ -30,7 +32,6 @@ export default function WorkOrderDetail() {
     clientServiceOrderNumber: '',
     priority: 'medium',
     scheduledDate: '',
-    assignedTechnicianId: '',
     startDate: '',
     completionDate: '',
     services: [],
@@ -51,6 +52,7 @@ export default function WorkOrderDetail() {
   const [savingMeasurement, setSavingMeasurement] = useState(false);
   const [superintendentSigSignedBy, setSuperintendentSigSignedBy] = useState('');
   const [superintendentSigUploading, setSuperintendentSigUploading] = useState(false);
+  const [adminPhotoUploading, setAdminPhotoUploading] = useState(false);
 
   const isDocVisibleToTechnician = (d) => {
     const v = d?.is_visible_to_technician;
@@ -178,7 +180,6 @@ export default function WorkOrderDetail() {
       clientServiceOrderNumber: order.client_service_order_number || '',
       priority: order.priority || 'medium',
       scheduledDate: toDateInputValue(order.scheduled_date),
-      assignedTechnicianId: order.assigned_technician_id ? String(order.assigned_technician_id) : '',
       startDate: toDateTimeLocalValue(order.start_date),
       completionDate: toDateTimeLocalValue(order.completion_date),
       services: orderServicesList.length > 0
@@ -191,9 +192,15 @@ export default function WorkOrderDetail() {
               nominalValue: h.nominal_value,
               nominalUnit: h.nominal_unit,
               tolerance: h.tolerance
-            }))
+            })),
+            technicians: (s.technicians || []).length > 0
+              ? s.technicians.map((t) => ({
+                  technicianId: String(t.technician_id),
+                  shift: t.shift === SHIFT_NIGHT || t.shift === 'night' ? SHIFT_NIGHT : SHIFT_DAY
+                }))
+              : [{ technicianId: '', shift: SHIFT_DAY }]
           }))
-        : [{ serviceId: '', housingCount: 0, housings: [] }],
+        : [{ serviceId: '', housingCount: 0, housings: [], technicians: [{ technicianId: '', shift: SHIFT_DAY }] }],
       description: order.description || ''
     });
     setEditMode(true);
@@ -209,11 +216,40 @@ export default function WorkOrderDetail() {
       selectedServiceIds.has(String(s.id))
   );
 
+  const needsOrderHousings = isMachiningRepairServiceType(serviceTypes, editData.serviceTypeId);
+
   const cancelEdit = () => {
     setEditMode(false);
     setSaving(false);
     setShowHousingsModal(false);
     setEditingServiceIdx(null);
+  };
+
+  const addEditTechnicianRow = (serviceIdx) => {
+    const next = [...(editData.services || [])];
+    const techs = [...(next[serviceIdx].technicians || []), { technicianId: '', shift: SHIFT_DAY }];
+    next[serviceIdx] = { ...next[serviceIdx], technicians: techs };
+    setEditData({ ...editData, services: next });
+  };
+
+  const removeEditTechnicianRow = (serviceIdx, techIdx) => {
+    const next = [...(editData.services || [])];
+    const techs = (next[serviceIdx].technicians || []).filter((_, i) => i !== techIdx);
+    next[serviceIdx] = {
+      ...next[serviceIdx],
+      technicians: techs.length ? techs : [{ technicianId: '', shift: SHIFT_DAY }]
+    };
+    setEditData({ ...editData, services: next });
+  };
+
+  const updateEditTechnician = (serviceIdx, techIdx, field, value) => {
+    const next = [...(editData.services || [])];
+    const techs = [...(next[serviceIdx].technicians || [])];
+    if (techs[techIdx]) {
+      techs[techIdx] = { ...techs[techIdx], [field]: value };
+      next[serviceIdx] = { ...next[serviceIdx], technicians: techs };
+      setEditData({ ...editData, services: next });
+    }
   };
 
   const openEditMeasurementModal = (measurement) => {
@@ -277,6 +313,7 @@ export default function WorkOrderDetail() {
   };
 
   const openHousingsModalForService = (idx) => {
+    if (!needsOrderHousings) return;
     const os = (editData.services || [])[idx];
     const count = Number(os?.housingCount) || 0;
     if (count <= 0) {
@@ -376,11 +413,6 @@ export default function WorkOrderDetail() {
       payload.scheduledDate = editData.scheduledDate || null;
     }
 
-    const currentAssigned = order.assigned_technician_id ? String(order.assigned_technician_id) : '';
-    if (editData.assignedTechnicianId !== currentAssigned) {
-      payload.assignedTechnicianId = editData.assignedTechnicianId ? parseInt(editData.assignedTechnicianId) : null;
-    }
-
     const currentStartDate = toDateTimeLocalValue(order.start_date);
     if (editData.startDate !== currentStartDate) payload.startDate = editData.startDate || null;
     const currentCompletionDate = toDateTimeLocalValue(order.completion_date);
@@ -398,6 +430,19 @@ export default function WorkOrderDetail() {
       };
     };
     const newServices = (editData.services || []).filter(s => s.serviceId).map(s => {
+      const techRows = (s.technicians || []).filter((t) => t.technicianId);
+      const technicians = techRows.map((t) => ({
+        technicianId: parseInt(t.technicianId, 10),
+        shift: t.shift === SHIFT_NIGHT ? SHIFT_NIGHT : SHIFT_DAY
+      }));
+      if (!needsOrderHousings) {
+        return {
+          serviceId: parseInt(s.serviceId, 10),
+          housingCount: 0,
+          housings: [],
+          technicians
+        };
+      }
       let rows = (s.housings || []).map(mapHousingRow);
       const count = parseInt(s.housingCount, 10) || 0;
       if (rows.length === 0 && count > 0) {
@@ -409,12 +454,19 @@ export default function WorkOrderDetail() {
       return {
         serviceId: parseInt(s.serviceId, 10),
         housingCount: count,
+        technicians,
         housings: rows
       };
     });
     // Incluir siempre servicios si hay filas: evita 400 "No fields to update" cuando el stringify
     // no detecta cambios pese a ediciones en alojamientos/medidas nominales.
     if (newServices.length > 0) {
+      for (const ns of newServices) {
+        if (!ns.technicians || ns.technicians.length === 0) {
+          showError('Cada servicio debe tener al menos un técnico con turno (Día/DS o Noche/NS).');
+          return;
+        }
+      }
       payload.services = newServices;
     }
 
@@ -451,16 +503,6 @@ export default function WorkOrderDetail() {
     }
   };
 
-  const handleAssignTechnician = async (technicianId) => {
-    try {
-      await api.put(`/work-orders/${id}`, { assignedTechnicianId: technicianId });
-      fetchOrder();
-    } catch (error) {
-      console.error('Error assigning technician:', error);
-      showError('Error al asignar técnico');
-    }
-  };
-
   const handleDeletePhoto = (photoId) => {
     showConfirm(
       '¿Eliminar esta foto? Esta acción no se puede deshacer.',
@@ -476,6 +518,33 @@ export default function WorkOrderDetail() {
       'Eliminar foto',
       { confirmText: 'Eliminar', cancelText: 'Cancelar', confirmDanger: true }
     );
+  };
+
+  const submitAdminPhoto = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const file = form.photo?.files?.[0];
+    if (!file) {
+      showError('Seleccione una imagen.');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('photo', file);
+    fd.append('photoType', form.photoType?.value || 'during_service');
+    fd.append('description', form.description?.value || '');
+    const wosVal = form.workOrderServiceId?.value;
+    if (wosVal) fd.append('workOrderServiceId', wosVal);
+    setAdminPhotoUploading(true);
+    try {
+      await api.post(`/work-orders/${id}/photos`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      showSuccess('Foto subida');
+      form.reset();
+      fetchOrder();
+    } catch (err) {
+      showError(err.response?.data?.error || 'Error al subir la foto');
+    } finally {
+      setAdminPhotoUploading(false);
+    }
   };
 
   if (loading) {
@@ -706,7 +775,25 @@ export default function WorkOrderDetail() {
                 {editMode ? (
                   <select
                     value={editData.serviceTypeId}
-                    onChange={(e) => setEditData({ ...editData, serviceTypeId: e.target.value })}
+                    onChange={(e) => {
+                      const nextType = e.target.value;
+                      setEditData((prev) => {
+                        const next = { ...prev, serviceTypeId: nextType };
+                        if (!isMachiningRepairServiceType(serviceTypes, nextType)) {
+                          next.services = (prev.services || []).map((os) => ({
+                            ...os,
+                            housingCount: 0,
+                            housings: [],
+                            technicians: os.technicians?.length ? os.technicians : [{ technicianId: '', shift: SHIFT_DAY }]
+                          }));
+                        }
+                        return next;
+                      });
+                      if (!isMachiningRepairServiceType(serviceTypes, nextType)) {
+                        setShowHousingsModal(false);
+                        setEditingServiceIdx(null);
+                      }
+                    }}
                   >
                     <option value="">Seleccionar tipo</option>
                     {serviceTypes.map((st) => (
@@ -732,21 +819,13 @@ export default function WorkOrderDetail() {
               </div>
 
               <div className="info-item">
-                <label>Técnico Asignado</label>
-                {editMode ? (
-                  <select
-                    value={editData.assignedTechnicianId}
-                    onChange={(e) => setEditData({ ...editData, assignedTechnicianId: e.target.value })}
-                  >
-                    <option value="">Sin asignar</option>
-                    {technicians.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.full_name}
-                      </option>
-                    ))}
-                  </select>
+                <label>Técnicos</label>
+                {!editMode ? (
+                  <p style={{ margin: 0 }}>{order.technician_name || '—'}</p>
                 ) : (
-                  <p>{order.technician_name || 'Sin asignar'}</p>
+                  <p style={{ margin: 0, fontSize: 13, color: '#6e6b7b' }}>
+                    Asigne técnicos y turno por cada servicio en la sección Servicios.
+                  </p>
                 )}
               </div>
 
@@ -802,69 +881,104 @@ export default function WorkOrderDetail() {
                 {editMode ? (
                   <div>
                     {(editData.services || []).map((os, idx) => (
-                      <div key={idx} style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 12, flexWrap: 'wrap' }}>
-                        <div style={{ flex: '2 1 200px', minWidth: 0 }}>
-                          <SearchableSelect
-                            value={os.serviceId}
-                            onChange={(val) => {
-                              const next = [...(editData.services || [])];
-                              next[idx] = { ...next[idx], serviceId: val };
-                              setEditData({ ...editData, services: next });
-                            }}
-                            options={servicesForOrder
-                              .filter(s => !(editData.services || []).some((o, i) => i !== idx && o.serviceId === String(s.id)))
-                              .map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
-                            placeholder="Seleccionar servicio..."
-                          />
+                      <div key={idx} style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #eceaf0' }}>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                          <div style={{ flex: '2 1 200px', minWidth: 0 }}>
+                            <SearchableSelect
+                              value={os.serviceId}
+                              onChange={(val) => {
+                                const next = [...(editData.services || [])];
+                                next[idx] = { ...next[idx], serviceId: val };
+                                setEditData({ ...editData, services: next });
+                              }}
+                              options={servicesForOrder
+                                .filter(s => !(editData.services || []).some((o, i) => i !== idx && o.serviceId === String(s.id)))
+                                .map((s) => ({ value: String(s.id), label: `${s.code} - ${s.name}` }))}
+                              placeholder="Seleccionar servicio..."
+                            />
+                          </div>
+                          {needsOrderHousings && (
+                          <div style={{ flex: '1 1 100px', minWidth: 100 }}>
+                            <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Alojamientos</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={os.housingCount || ''}
+                              onChange={(e) => {
+                                const count = Number(e.target.value) || 0;
+                                const next = [...(editData.services || [])];
+                                const existing = next[idx].housings || [];
+                                const newHousings = Array.from({ length: count }).map((_, i) => {
+                                  if (existing[i]) return existing[i];
+                                  return {
+                                    measureCode: numberToLetters(i + 1),
+                                    description: '',
+                                    nominalValue: '',
+                                    nominalUnit: '',
+                                    tolerance: ''
+                                  };
+                                });
+                                next[idx] = { ...next[idx], housingCount: e.target.value, housings: newHousings };
+                                setEditData({ ...editData, services: next });
+                                if (count > 0) {
+                                  setEditingServiceIdx(idx);
+                                  setShowHousingsModal(true);
+                                }
+                              }}
+                              placeholder="0"
+                            />
+                          </div>
+                          )}
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            {needsOrderHousings && (
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              onClick={() => openHousingsModalForService(idx)}
+                              title="Ver / Editar alojamientos"
+                              style={{ padding: '8px 12px' }}
+                            >
+                              📋
+                            </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              onClick={() => setEditData({ ...editData, services: (editData.services || []).filter((_, i) => i !== idx) })}
+                              title="Quitar servicio"
+                              style={{ padding: '8px 12px' }}
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </div>
-                        <div style={{ flex: '1 1 100px', minWidth: 100 }}>
-                          <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Alojamientos</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={os.housingCount || ''}
-                            onChange={(e) => {
-                              const count = Number(e.target.value) || 0;
-                              const next = [...(editData.services || [])];
-                              const existing = next[idx].housings || [];
-                              const newHousings = Array.from({ length: count }).map((_, i) => {
-                                if (existing[i]) return existing[i];
-                                return {
-                                  measureCode: numberToLetters(i + 1),
-                                  description: '',
-                                  nominalValue: '',
-                                  nominalUnit: '',
-                                  tolerance: ''
-                                };
-                              });
-                              next[idx] = { ...next[idx], housingCount: e.target.value, housings: newHousings };
-                              setEditData({ ...editData, services: next });
-                              if (count > 0) {
-                                setEditingServiceIdx(idx);
-                                setShowHousingsModal(true);
-                              }
-                            }}
-                            placeholder="0"
-                          />
-                        </div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button
-                            type="button"
-                            className="btn-secondary"
-                            onClick={() => openHousingsModalForService(idx)}
-                            title="Ver / Editar alojamientos"
-                            style={{ padding: '8px 12px' }}
-                          >
-                            📋
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-secondary"
-                            onClick={() => setEditData({ ...editData, services: (editData.services || []).filter((_, i) => i !== idx) })}
-                            title="Quitar servicio"
-                            style={{ padding: '8px 12px' }}
-                          >
-                            ✕
+                        <div style={{ marginTop: 10 }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#5c5966' }}>Técnicos y turno</span>
+                          {(os.technicians || [{ technicianId: '', shift: SHIFT_DAY }]).map((t, ti) => (
+                            <div key={ti} style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                              <select
+                                value={t.technicianId}
+                                onChange={(e) => updateEditTechnician(idx, ti, 'technicianId', e.target.value)}
+                                style={{ flex: '2 1 180px', minWidth: 140 }}
+                              >
+                                <option value="">Seleccionar técnico</option>
+                                {technicians.map((tech) => (
+                                  <option key={tech.id} value={tech.id}>{tech.full_name}</option>
+                                ))}
+                              </select>
+                              <select
+                                value={t.shift === SHIFT_NIGHT ? SHIFT_NIGHT : SHIFT_DAY}
+                                onChange={(e) => updateEditTechnician(idx, ti, 'shift', e.target.value)}
+                                style={{ flex: '1 1 140px', minWidth: 120 }}
+                              >
+                                <option value={SHIFT_DAY}>{shiftLabel(SHIFT_DAY)}</option>
+                                <option value={SHIFT_NIGHT}>{shiftLabel(SHIFT_NIGHT)}</option>
+                              </select>
+                              <button type="button" className="btn-secondary" style={{ padding: '6px 10px' }} onClick={() => removeEditTechnicianRow(idx, ti)} title="Quitar técnico">−</button>
+                            </div>
+                          ))}
+                          <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={() => addEditTechnicianRow(idx)}>
+                            + Agregar técnico
                           </button>
                         </div>
                       </div>
@@ -872,7 +986,10 @@ export default function WorkOrderDetail() {
                     <button
                       type="button"
                       className="btn-secondary"
-                      onClick={() => setEditData({ ...editData, services: [...(editData.services || []), { serviceId: '', housingCount: 0, housings: [] }] })}
+                      onClick={() => setEditData({
+                        ...editData,
+                        services: [...(editData.services || []), { serviceId: '', housingCount: 0, housings: [], technicians: [{ technicianId: '', shift: SHIFT_DAY }] }]
+                      })}
                       style={{ marginTop: 4 }}
                     >
                       + Agregar Servicio
@@ -884,7 +1001,20 @@ export default function WorkOrderDetail() {
                       <ul style={{ margin: 0, paddingLeft: 20 }}>
                         {(order.services || []).map((s, i) => (
                           <li key={i}>
-                            {s.service_code} {s.service_name} — {((s.housings || []).length || s.housing_count || 0)} alojamiento(s)
+                            <strong>{s.service_code} {s.service_name}</strong>
+                            {isMachiningRepairByTypeName(order.service_type_name)
+                              ? ` — ${((s.housings || []).length || s.housing_count || 0)} alojamiento(s)`
+                              : ''}
+                            {(s.technicians || []).length > 0 && (
+                              <div style={{ marginTop: 4, fontSize: 13, color: '#4a4752' }}>
+                                {(s.technicians || []).map((t, j) => (
+                                  <span key={j}>
+                                    {j > 0 ? '; ' : ''}
+                                    {t.full_name} ({shiftLabel(t.shift)})
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -1114,6 +1244,48 @@ export default function WorkOrderDetail() {
 
         {activeTab === 'photos' && (
           <div className="photos-section">
+            <form onSubmit={submitAdminPhoto} className="admin-photo-upload-form" style={{ marginBottom: 20, padding: 16, background: 'var(--card-bg, #fff)', borderRadius: 8, border: '1px solid var(--border-color, #e5e2eb)' }}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Subir foto</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="admin-photo-file">Archivo</label>
+                  <input id="admin-photo-file" name="photo" type="file" accept="image/*" required />
+                </div>
+                {(order.services || []).filter((s) => s.id).length > 1 && (
+                  <div className="form-group" style={{ marginBottom: 0, minWidth: 220 }}>
+                    <label htmlFor="admin-photo-service">Servicio</label>
+                    <select id="admin-photo-service" name="workOrderServiceId" required>
+                      <option value="">Seleccione…</option>
+                      {(order.services || []).filter((s) => s.id).map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.service_code ? `${s.service_code} — ` : ''}{s.service_name || 'Servicio'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="admin-photo-type">Tipo</label>
+                  <select id="admin-photo-type" name="photoType" defaultValue="during_service">
+                    <option value="inspection">Inspección</option>
+                    <option value="during_service">Durante el servicio</option>
+                    <option value="completion">Finalización</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0, flex: '1 1 200px' }}>
+                  <label htmlFor="admin-photo-desc">Descripción</label>
+                  <input id="admin-photo-desc" name="description" type="text" placeholder="Opcional" />
+                </div>
+                <button type="submit" className="btn-primary" disabled={adminPhotoUploading}>
+                  {adminPhotoUploading ? 'Subiendo…' : 'Subir'}
+                </button>
+              </div>
+              {(order.services || []).filter((s) => s.id).length <= 1 && (
+                <p style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--text-light)' }}>
+                  Con un solo servicio en la OT, la foto se asocia automáticamente a ese servicio.
+                </p>
+              )}
+            </form>
             {order.photos && order.photos.length > 0 ? (
               <div className="photos-grid">
                 {order.photos.map(photo => (
@@ -1127,6 +1299,11 @@ export default function WorkOrderDetail() {
                       onKeyDown={(e) => e.key === 'Enter' && setExpandedPhoto(photo)}
                       title="Ampliar"
                     />
+                    {photo.photo_service_name || photo.photo_service_code ? (
+                      <p style={{ fontSize: 12, fontWeight: 600, margin: '4px 0 0' }}>
+                        Servicio: {photo.photo_service_code ? `${photo.photo_service_code} — ` : ''}{photo.photo_service_name || '—'}
+                      </p>
+                    ) : null}
                     <p>{photo.description || 'Sin descripción'}</p>
                     <button
                       type="button"
@@ -1403,7 +1580,7 @@ export default function WorkOrderDetail() {
         )}
       </div>
 
-      {showHousingsModal && editingServiceIdx !== null && editMode && (
+      {needsOrderHousings && showHousingsModal && editingServiceIdx !== null && editMode && (
         <div className="modal-overlay" onClick={() => closeHousingsModal(false)}>
           <div
             className="modal-content"

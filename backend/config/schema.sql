@@ -180,6 +180,18 @@ CREATE TABLE IF NOT EXISTS work_order_services (
   UNIQUE KEY unique_work_order_service (work_order_id, service_id)
 );
 
+-- Técnicos por línea de servicio de la OT (turno Día/DS o Noche/NS)
+CREATE TABLE IF NOT EXISTS work_order_service_technicians (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  work_order_service_id INT NOT NULL,
+  technician_id INT NOT NULL,
+  shift ENUM('day', 'night') NOT NULL DEFAULT 'day' COMMENT 'day=Día/DS, night=Noche/NS',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (work_order_service_id) REFERENCES work_order_services(id) ON DELETE CASCADE,
+  FOREIGN KEY (technician_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_wos_technician (work_order_service_id, technician_id)
+);
+
 -- Work Order Service Housings (Alojamientos intervenidos en la OT, por servicio - cada servicio tiene A, B, C...)
 CREATE TABLE IF NOT EXISTS work_order_housings (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -234,12 +246,14 @@ CREATE TABLE IF NOT EXISTS measurements (
 CREATE TABLE IF NOT EXISTS work_order_photos (
   id INT PRIMARY KEY AUTO_INCREMENT,
   work_order_id INT NOT NULL,
+  work_order_service_id INT NULL COMMENT 'Servicio de la OT al que pertenece la foto',
   photo_path VARCHAR(255) NOT NULL,
   photo_type ENUM('inspection', 'during_service', 'completion') DEFAULT 'during_service',
   description TEXT,
   uploaded_by INT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (work_order_service_id) REFERENCES work_order_services(id) ON DELETE SET NULL,
   FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
 );
 

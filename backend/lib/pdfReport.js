@@ -381,7 +381,19 @@ export async function generateWorkOrderReport(orderData) {
       services.forEach((svc) => {
         const name = svc.service_name || svc.service_code || 'Servicio';
         const count = (svc.housings && svc.housings.length) || svc.housing_count || 0;
-        doc.text(`• ${name} (${count} alojamiento${count !== 1 ? 's' : ''})`, MARGIN + 10, y);
+        const techBits =
+          Array.isArray(svc.technicians) && svc.technicians.length > 0
+            ? svc.technicians
+                .map((t) => {
+                  const nm = t.full_name || '';
+                  const sh = t.shift === 'night' || t.shift === 'NS' ? 'Noche/NS' : 'Día/DS';
+                  return nm ? `${nm} (${sh})` : '';
+                })
+                .filter(Boolean)
+                .join(', ')
+            : '';
+        const techSuffix = techBits ? ` — ${techBits}` : '';
+        doc.text(`• ${name}${techSuffix} (${count} alojamiento${count !== 1 ? 's' : ''})`, MARGIN + 10, y);
         y += 14;
       });
     }

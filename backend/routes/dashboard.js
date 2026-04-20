@@ -72,7 +72,14 @@ router.get('/kpis', authenticateToken, requireRole('admin'), async (req, res) =>
             THEN TIMESTAMPDIFF(HOUR, wo.start_date, wo.completion_date) 
             ELSE NULL END) as avg_completion_hours
        FROM users u
-       LEFT JOIN work_orders wo ON u.id = wo.assigned_technician_id
+       LEFT JOIN work_orders wo ON (
+         wo.assigned_technician_id = u.id
+         OR EXISTS (
+           SELECT 1 FROM work_order_service_technicians wost
+           INNER JOIN work_order_services wos ON wost.work_order_service_id = wos.id
+           WHERE wos.work_order_id = wo.id AND wost.technician_id = u.id
+         )
+       )
        WHERE u.role = 'technician' AND u.is_active = TRUE
        ${dateFilter ? 'AND wo.created_at BETWEEN ? AND ?' : ''}
        GROUP BY u.id, u.full_name
@@ -259,8 +266,13 @@ router.get('/technician/:id', authenticateToken, async (req, res) => {
        LEFT JOIN equipment_models em ON e.model_id = em.id
        LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
        WHERE wo.assigned_technician_id = ?
+          OR EXISTS (
+            SELECT 1 FROM work_order_service_technicians wost
+            INNER JOIN work_order_services wos ON wost.work_order_service_id = wos.id
+            WHERE wos.work_order_id = wo.id AND wost.technician_id = ?
+          )
        ORDER BY wo.created_at DESC`,
-      [technicianId]
+      [technicianId, technicianId]
     );
     
     // Get statistics
@@ -271,9 +283,14 @@ router.get('/technician/:id', authenticateToken, async (req, res) => {
         SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
         SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) as accepted
-       FROM work_orders
-       WHERE assigned_technician_id = ?`,
-      [technicianId]
+       FROM work_orders wo
+       WHERE wo.assigned_technician_id = ?
+          OR EXISTS (
+            SELECT 1 FROM work_order_service_technicians wost
+            INNER JOIN work_order_services wos ON wost.work_order_service_id = wos.id
+            WHERE wos.work_order_id = wo.id AND wost.technician_id = ?
+          )`,
+      [technicianId, technicianId]
     );
     
     res.json({

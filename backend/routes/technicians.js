@@ -55,9 +55,14 @@ router.get('/:id/stats', authenticateToken, async (req, res) => {
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_orders,
         SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_orders,
         SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) as accepted_orders
-       FROM work_orders 
-       WHERE assigned_technician_id = ?`,
-      [technicianId]
+       FROM work_orders wo
+       WHERE wo.assigned_technician_id = ?
+          OR EXISTS (
+            SELECT 1 FROM work_order_service_technicians wost
+            INNER JOIN work_order_services wos ON wost.work_order_service_id = wos.id
+            WHERE wos.work_order_id = wo.id AND wost.technician_id = ?
+          )`,
+      [technicianId, technicianId]
     );
 
     res.json(stats[0] || { total_orders: 0, completed_orders: 0, in_progress_orders: 0, accepted_orders: 0 });

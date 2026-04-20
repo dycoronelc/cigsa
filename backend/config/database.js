@@ -732,6 +732,74 @@ export const initDatabase = async () => {
       }
     }
 
+    // work_order_service_technicians: técnicos y turno por servicio en la OT
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS work_order_service_technicians (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          work_order_service_id INT NOT NULL,
+          technician_id INT NOT NULL,
+          shift ENUM('day', 'night') NOT NULL DEFAULT 'day',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (work_order_service_id) REFERENCES work_order_services(id) ON DELETE CASCADE,
+          FOREIGN KEY (technician_id) REFERENCES users(id) ON DELETE CASCADE,
+          UNIQUE KEY unique_wos_technician (work_order_service_id, technician_id)
+        )
+      `);
+      const [migRows] = await pool.query(`
+        SELECT wo.id AS wo_id, wo.assigned_technician_id AS tech_id, wos.id AS wos_id
+        FROM work_orders wo
+        INNER JOIN work_order_services wos ON wos.work_order_id = wo.id
+        WHERE wo.assigned_technician_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM work_order_service_technicians x WHERE x.work_order_service_id = wos.id
+        )
+      `);
+      for (const row of migRows) {
+        try {
+          await pool.query(
+            `INSERT INTO work_order_service_technicians (work_order_service_id, technician_id, shift) VALUES (?, ?, 'day')`,
+            [row.wos_id, row.tech_id]
+          );
+        } catch (e) {
+          if (!e.sqlMessage?.includes('Duplicate')) console.warn('Migration work_order_service_technicians:', e.message);
+        }
+      }
+      if (migRows.length > 0) {
+        console.log(`Migrated ${migRows.length} work order service rows with legacy assigned technician`);
+      }
+    } catch (error) {
+      console.error('Error ensuring work_order_service_technicians:', error.sqlMessage || error.message);
+    }
+
+    // work_order_photos.work_order_service_id
+    try {
+      const [photoWosCol] = await pool.query(
+        `
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_order_photos' AND COLUMN_NAME = 'work_order_service_id'
+        `,
+        [process.env.DB_NAME || 'cigsa_db']
+      );
+      if (photoWosCol.length === 0) {
+        await pool.query(
+          'ALTER TABLE work_order_photos ADD COLUMN work_order_service_id INT NULL AFTER work_order_id'
+        );
+        try {
+          await pool.query(
+            'ALTER TABLE work_order_photos ADD CONSTRAINT wop_fk_wos FOREIGN KEY (work_order_service_id) REFERENCES work_order_services(id) ON DELETE SET NULL'
+          );
+        } catch (fkErr) {
+          if (!fkErr.sqlMessage?.includes('Duplicate')) console.warn('FK wop_fk_wos:', fkErr.message);
+        }
+        console.log('Added work_order_service_id to work_order_photos');
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error adding work_order_service_id to work_order_photos:', error.message);
+      }
+    }
+
     // Create uploads directory if it doesn't exist
     const uploadsDir = path.join(__dirname, '..', process.env.UPLOAD_DIR || 'uploads');
     if (!fs.existsSync(uploadsDir)) {

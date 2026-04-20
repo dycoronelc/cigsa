@@ -4,6 +4,8 @@ import api from '../../services/api';
 import { getStaticUrl } from '../../config.js';
 import { getWorkingDaysCount } from '../../utils/workOrderWorkingDays.js';
 import { openWorkOrderDocumentInNewTab } from '../../utils/openWorkOrderDocument.js';
+import { isMachiningRepairByTypeName } from '../../utils/serviceTypeHousings.js';
+import { useAuth } from '../../contexts/AuthContext';
 import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
 import './Technician.css';
@@ -76,6 +78,7 @@ function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.82) 
 export default function TechnicianWorkOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { alertDialog, showError, showSuccess, showConfirm, closeAlert } = useAlert();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -296,12 +299,29 @@ export default function TechnicianWorkOrderDetail() {
     const form = typeof e?.target?.photoType !== 'undefined' ? e.target : document.getElementById('photo-upload-form');
     const photoType = form?.photoType?.value || 'during_service';
     const description = form?.description?.value || '';
+    const uid = user?.id;
+    const services = (order?.services || []).filter((s) => s.id);
+    const legacyAll = order?.assigned_technician_id && Number(order.assigned_technician_id) === Number(uid);
+    const photoServiceChoices = legacyAll
+      ? services
+      : services.filter((s) => (s.technicians || []).some((t) => Number(t.technician_id) === Number(uid)));
+    let workOrderServiceId = '';
+    if (photoServiceChoices.length === 1) {
+      workOrderServiceId = String(photoServiceChoices[0].id);
+    } else if (photoServiceChoices.length > 1) {
+      workOrderServiceId = (form?.workOrderServiceId?.value || '').trim();
+      if (!workOrderServiceId) {
+        showError('Seleccione el servicio al que corresponde la foto.');
+        return;
+      }
+    }
     try {
       const uploadPromises = selectedPhotos.map(async (file) => {
         const formData = new FormData();
         formData.append('photo', file);
         formData.append('photoType', photoType);
         formData.append('description', description);
+        if (workOrderServiceId) formData.append('workOrderServiceId', workOrderServiceId);
         return api.post(`/work-orders/${id}/photos`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
@@ -584,7 +604,10 @@ export default function TechnicianWorkOrderDetail() {
                 <ul style={{ margin: 0, paddingLeft: 20 }}>
                   {(order.services || []).map((s, i) => (
                     <li key={i}>
-                      <strong>{s.service_code} {s.service_name}</strong> — {s.housing_count ?? 0} alojamiento(s) a intervenir
+                      <strong>{s.service_code} {s.service_name}</strong>
+                      {isMachiningRepairByTypeName(order.service_type_name)
+                        ? ` — ${s.housing_count ?? 0} alojamiento(s) a intervenir`
+                        : ''}
                     </li>
                   ))}
                 </ul>
@@ -762,6 +785,11 @@ export default function TechnicianWorkOrderDetail() {
                       onKeyDown={(e) => e.key === 'Enter' && setExpandedPhoto(photo)}
                       title="Ampliar"
                     />
+                    {photo.photo_service_name || photo.photo_service_code ? (
+                      <p style={{ fontSize: 12, fontWeight: 600, margin: '4px 0 0' }}>
+                        Servicio: {photo.photo_service_code ? `${photo.photo_service_code} — ` : ''}{photo.photo_service_name || '—'}
+                      </p>
+                    ) : null}
                     <button
                       type="button"
                       className="photo-delete-btn"
@@ -1156,6 +1184,28 @@ export default function TechnicianWorkOrderDetail() {
               <strong>{selectedPhotos.length}</strong> foto(s) seleccionada(s)
             </div>
             <form id="photo-upload-form" onSubmit={handlePhotoSubmit}>
+              {(() => {
+                const uid = user?.id;
+                const services = (order?.services || []).filter((s) => s.id);
+                const legacyAll = order?.assigned_technician_id && Number(order.assigned_technician_id) === Number(uid);
+                const choices = legacyAll
+                  ? services
+                  : services.filter((s) => (s.technicians || []).some((t) => Number(t.technician_id) === Number(uid)));
+                if (choices.length <= 1) return null;
+                return (
+                  <div className="form-group" style={{ marginBottom: 12 }}>
+                    <label htmlFor="tech-photo-wos">Servicio</label>
+                    <select id="tech-photo-wos" name="workOrderServiceId" required>
+                      <option value="">Seleccione…</option>
+                      {choices.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.service_code ? `${s.service_code} — ` : ''}{s.service_name || 'Servicio'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })()}
               <select name="photoType">
                 <option value="inspection">Inspección</option>
                 <option value="during_service">Durante Servicio</option>

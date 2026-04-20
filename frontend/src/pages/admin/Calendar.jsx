@@ -50,9 +50,15 @@ export default function CalendarView() {
       let filteredOrders = response.data;
 
       if (filters.technicianId) {
-        filteredOrders = filteredOrders.filter(
-          order => order.assigned_technician_id && order.assigned_technician_id === parseInt(filters.technicianId)
-        );
+        const tid = parseInt(filters.technicianId, 10);
+        filteredOrders = filteredOrders.filter((order) => {
+          if (order.assigned_technician_id && order.assigned_technician_id === tid) return true;
+          const csv = order.service_technician_ids;
+          if (csv && typeof csv === 'string') {
+            return csv.split(',').some((x) => parseInt(x, 10) === tid);
+          }
+          return false;
+        });
       }
 
       if (filters.status) {

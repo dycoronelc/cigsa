@@ -72,13 +72,21 @@ router.get('/:id', authenticateToken, async (req, res) => {
         c.name as client_name,
         c.company_name,
         CONCAT(eb.name, ' ', em.model_name, ' - ', e.serial_number) as equipment_name,
-        u.full_name as technician_name
+        COALESCE(svc_techs.tech_names, u.full_name) as technician_name
       FROM work_orders wo
       LEFT JOIN clients c ON wo.client_id = c.id
       LEFT JOIN equipment e ON wo.equipment_id = e.id
       LEFT JOIN equipment_models em ON e.model_id = em.id
       LEFT JOIN equipment_brands eb ON em.brand_id = eb.id
       LEFT JOIN users u ON wo.assigned_technician_id = u.id
+      LEFT JOIN (
+        SELECT wos.work_order_id,
+          GROUP_CONCAT(DISTINCT CONCAT(u2.full_name, ' (', IF(wost.shift = 'night', 'Noche/NS', 'Día/DS'), ')') ORDER BY u2.full_name SEPARATOR ', ') AS tech_names
+        FROM work_order_service_technicians wost
+        INNER JOIN work_order_services wos ON wost.work_order_service_id = wos.id
+        INNER JOIN users u2 ON wost.technician_id = u2.id
+        GROUP BY wos.work_order_id
+      ) svc_techs ON svc_techs.work_order_id = wo.id
       WHERE EXISTS (SELECT 1 FROM work_order_services wos WHERE wos.work_order_id = wo.id AND wos.service_id = ?)
          OR wo.service_id = ?
       ORDER BY wo.created_at DESC

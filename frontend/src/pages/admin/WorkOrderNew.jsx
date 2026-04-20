@@ -4,6 +4,8 @@ import api from '../../services/api';
 import { useAlert } from '../../hooks/useAlert';
 import AlertDialog from '../../components/AlertDialog';
 import SearchableSelect from '../../components/SearchableSelect';
+import { isMachiningRepairServiceType } from '../../utils/serviceTypeHousings';
+import { SHIFT_DAY, SHIFT_NIGHT, shiftLabel } from '../../utils/serviceTechnicianShift';
 import './WorkOrderNew.css';
 
 export default function WorkOrderNew() {
@@ -18,7 +20,9 @@ export default function WorkOrderNew() {
   const [technicians, setTechnicians] = useState([]);
   const [showHousingsModal, setShowHousingsModal] = useState(false);
   const [editingServiceIdx, setEditingServiceIdx] = useState(null);
-  const [orderServices, setOrderServices] = useState([{ serviceId: '', housingCount: 0, housings: [] }]);
+  const [orderServices, setOrderServices] = useState([
+    { serviceId: '', housingCount: 0, housings: [], technicians: [{ technicianId: '', shift: SHIFT_DAY }] }
+  ]);
   const [formData, setFormData] = useState({
     clientId: '',
     equipmentId: '',
@@ -28,9 +32,13 @@ export default function WorkOrderNew() {
     title: '',
     description: '',
     priority: 'medium',
-    scheduledDate: '',
-    assignedTechnicianId: ''
+    scheduledDate: ''
   });
+
+  const servicesForOrder = formData.serviceTypeId
+    ? services.filter((s) => String(s.service_type_id) === String(formData.serviceTypeId))
+    : services;
+  const needsOrderHousings = isMachiningRepairServiceType(serviceTypes, formData.serviceTypeId);
 
   const numberToLetters = (n) => {
     let num = n;
@@ -44,6 +52,7 @@ export default function WorkOrderNew() {
   };
 
   const openHousingsModalForService = (idx) => {
+    if (!needsOrderHousings) return;
     const os = orderServices[idx];
     const count = Number(os.housingCount) || 0;
     if (!Number.isFinite(count) || count <= 0) {
@@ -96,7 +105,34 @@ export default function WorkOrderNew() {
   };
 
   const addService = () => {
-    setOrderServices([...orderServices, { serviceId: '', housingCount: 0, housings: [] }]);
+    setOrderServices([
+      ...orderServices,
+      { serviceId: '', housingCount: 0, housings: [], technicians: [{ technicianId: '', shift: SHIFT_DAY }] }
+    ]);
+  };
+
+  const addTechnicianRow = (serviceIdx) => {
+    const next = [...orderServices];
+    const techs = [...(next[serviceIdx].technicians || []), { technicianId: '', shift: SHIFT_DAY }];
+    next[serviceIdx] = { ...next[serviceIdx], technicians: techs };
+    setOrderServices(next);
+  };
+
+  const removeTechnicianRow = (serviceIdx, techIdx) => {
+    const next = [...orderServices];
+    const techs = (next[serviceIdx].technicians || []).filter((_, i) => i !== techIdx);
+    next[serviceIdx] = { ...next[serviceIdx], technicians: techs.length ? techs : [{ technicianId: '', shift: SHIFT_DAY }] };
+    setOrderServices(next);
+  };
+
+  const updateServiceTechnician = (serviceIdx, techIdx, field, value) => {
+    const next = [...orderServices];
+    const techs = [...(next[serviceIdx].technicians || [])];
+    if (techs[techIdx]) {
+      techs[techIdx] = { ...techs[techIdx], [field]: value };
+      next[serviceIdx] = { ...next[serviceIdx], technicians: techs };
+      setOrderServices(next);
+    }
   };
 
   const removeService = (idx) => {
@@ -106,7 +142,7 @@ export default function WorkOrderNew() {
   const updateService = (idx, field, value) => {
     const next = [...orderServices];
     next[idx] = { ...next[idx], [field]: value };
-    if (field === 'housingCount') {
+    if (field === 'housingCount' && needsOrderHousings) {
       const count = Number(value) || 0;
       if (count > 0) {
         const existing = next[idx].housings || [];
@@ -162,11 +198,6 @@ export default function WorkOrderNew() {
     }
   };
 
-  // Servicios disponibles según el tipo seleccionado en la OT
-  const servicesForOrder = formData.serviceTypeId
-    ? services.filter((s) => String(s.service_type_id) === String(formData.serviceTypeId))
-    : services;
-
   const fetchEquipment = async (clientId) => {
     try {
       const response = await api.get(`/equipment?clientId=${clientId}`);
@@ -195,6 +226,22 @@ export default function WorkOrderNew() {
       const servicesPayload = orderServices
         .filter(s => s.serviceId)
         .map(s => {
+          const techRows = (s.technicians || []).filter((t) => t.technicianId);
+          if (techRows.length === 0) {
+            throw new Error('Cada servicio debe tener al menos un técnico (turno Día/DS o Noche/NS).');
+          }
+          const technicians = techRows.map((t) => ({
+            technicianId: parseInt(t.technicianId, 10),
+            shift: t.shift === SHIFT_NIGHT ? SHIFT_NIGHT : SHIFT_DAY
+          }));
+          if (!needsOrderHousings) {
+            return {
+              serviceId: parseInt(s.serviceId),
+              housingCount: 0,
+              housings: [],
+              technicians
+            };
+          }
           const housingCount = parseInt(s.housingCount) || 0;
           const housings = (s.housings || []).slice(0, housingCount);
           const hasMissing = housings.some(
@@ -206,6 +253,7 @@ export default function WorkOrderNew() {
           return {
             serviceId: parseInt(s.serviceId),
             housingCount,
+            technicians,
             housings: housings.map(h => ({
               measureCode: h.measureCode,
               description: h.description,
@@ -232,8 +280,7 @@ export default function WorkOrderNew() {
         title: formData.title,
         description: formData.description,
         priority: formData.priority,
-        scheduledDate: formData.scheduledDate || null,
-        assignedTechnicianId: formData.assignedTechnicianId ? parseInt(formData.assignedTechnicianId) : null
+        scheduledDate: formData.scheduledDate || null
       });
 
       showSuccess('Orden de trabajo creada exitosamente');
@@ -322,7 +369,22 @@ export default function WorkOrderNew() {
             <select
               id="serviceTypeId"
               value={formData.serviceTypeId}
-              onChange={(e) => setFormData({ ...formData, serviceTypeId: e.target.value })}
+              onChange={(e) => {
+                const nextType = e.target.value;
+                setFormData({ ...formData, serviceTypeId: nextType });
+                if (!isMachiningRepairServiceType(serviceTypes, nextType)) {
+                  setOrderServices((prev) =>
+                    prev.map((os) => ({
+                      ...os,
+                      housingCount: 0,
+                      housings: [],
+                      technicians: os.technicians?.length ? os.technicians : [{ technicianId: '', shift: SHIFT_DAY }]
+                    }))
+                  );
+                  setShowHousingsModal(false);
+                  setEditingServiceIdx(null);
+                }
+              }}
             >
               <option value="">Seleccionar tipo de servicio</option>
               {serviceTypes.map((st) => (
@@ -372,10 +434,13 @@ export default function WorkOrderNew() {
             <label>Servicios</label>
             <p style={{ marginTop: -4, marginBottom: 8, color: '#6e6b7b', fontSize: '0.9em' }}>
               {formData.serviceTypeId ? 'Servicios del tipo seleccionado. ' : 'Seleccione primero un Tipo de Servicio para filtrar los servicios. '}
-              Agregue uno o más servicios. Para cada uno: seleccione el servicio, indique la cantidad de alojamientos y complete los datos.
+              {needsOrderHousings
+                ? 'Agregue uno o más servicios. Para cada uno: seleccione el servicio, indique la cantidad de alojamientos y complete los datos.'
+                : 'Agregue uno o más servicios. La cantidad de alojamientos solo se solicita para el tipo «Reparación por Mecanizado».'}
             </p>
             {orderServices.map((os, idx) => (
-              <div key={idx} className="service-row" style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 12, flexWrap: 'wrap' }}>
+              <div key={idx} className="service-row" style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #e8e6ef' }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                 <div style={{ flex: '2 1 200px', minWidth: 0 }}>
                   <SearchableSelect
                     value={os.serviceId}
@@ -393,6 +458,7 @@ export default function WorkOrderNew() {
                     disabled={!formData.serviceTypeId}
                   />
                 </div>
+                {needsOrderHousings && (
                 <div style={{ flex: '1 1 100px', minWidth: 100 }}>
                   <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Alojamientos</label>
                   <input
@@ -403,7 +469,9 @@ export default function WorkOrderNew() {
                     placeholder="0"
                   />
                 </div>
+                )}
                 <div style={{ display: 'flex', gap: 8 }}>
+                  {needsOrderHousings && (
                   <button
                     type="button"
                     className="btn-secondary"
@@ -413,6 +481,7 @@ export default function WorkOrderNew() {
                   >
                     📋
                   </button>
+                  )}
                   <button
                     type="button"
                     className="btn-secondary"
@@ -421,6 +490,36 @@ export default function WorkOrderNew() {
                     style={{ padding: '8px 12px' }}
                   >
                     ✕
+                  </button>
+                </div>
+                </div>
+                <div style={{ width: '100%', marginTop: 8, paddingTop: 8, borderTop: '1px solid #e8e6ef' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#5c5966' }}>Técnicos y turno</span>
+                  {(os.technicians || [{ technicianId: '', shift: SHIFT_DAY }]).map((t, ti) => (
+                    <div key={ti} style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                      <select
+                        value={t.technicianId}
+                        onChange={(e) => updateServiceTechnician(idx, ti, 'technicianId', e.target.value)}
+                        style={{ flex: '2 1 180px', minWidth: 140 }}
+                      >
+                        <option value="">Seleccionar técnico</option>
+                        {technicians.map((tech) => (
+                          <option key={tech.id} value={tech.id}>{tech.full_name}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={t.shift === SHIFT_NIGHT ? SHIFT_NIGHT : SHIFT_DAY}
+                        onChange={(e) => updateServiceTechnician(idx, ti, 'shift', e.target.value)}
+                        style={{ flex: '1 1 140px', minWidth: 120 }}
+                      >
+                        <option value={SHIFT_DAY}>{shiftLabel(SHIFT_DAY)}</option>
+                        <option value={SHIFT_NIGHT}>{shiftLabel(SHIFT_NIGHT)}</option>
+                      </select>
+                      <button type="button" className="btn-secondary" style={{ padding: '6px 10px' }} onClick={() => removeTechnicianRow(idx, ti)} title="Quitar técnico">−</button>
+                    </div>
+                  ))}
+                  <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={() => addTechnicianRow(idx)}>
+                    + Agregar técnico
                   </button>
                 </div>
               </div>
@@ -449,22 +548,6 @@ export default function WorkOrderNew() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="assignedTechnicianId">Técnico Asignado</label>
-            <select
-              id="assignedTechnicianId"
-              value={formData.assignedTechnicianId}
-              onChange={(e) => setFormData({ ...formData, assignedTechnicianId: e.target.value })}
-            >
-              <option value="">Sin asignar (se puede asignar después)</option>
-              {technicians.map(tech => (
-                <option key={tech.id} value={tech.id}>
-                  {tech.full_name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
             <label htmlFor="scheduledDate">Fecha Programada</label>
             <input
               type="date"
@@ -485,7 +568,7 @@ export default function WorkOrderNew() {
         </div>
       </form>
 
-      {showHousingsModal && editingServiceIdx !== null && (
+      {needsOrderHousings && showHousingsModal && editingServiceIdx !== null && (
         <div className="modal-overlay" onClick={() => closeHousingsModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 750 }}>
             <h2>Alojamientos — {currentServiceName}</h2>
