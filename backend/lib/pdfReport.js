@@ -286,6 +286,32 @@ function ensureSpace(doc, reportDate, currentY, neededHeight) {
   return CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
 }
 
+/** Fila de datos en dos columnas (texto ajustado); evita solapar líneas largas p. ej. listas de técnicos. */
+function drawReportHeaderDataRow(
+  doc,
+  reportDate,
+  y,
+  leftText,
+  rightText,
+  { leftW = 230, rightX, rightW } = {}
+) {
+  const rx = rightX ?? MARGIN + leftW + 8;
+  const rw = rightW ?? PAGE_WIDTH - MARGIN - rx;
+  doc.font('Helvetica').fontSize(10).fillColor('black');
+  const hL = leftText != null && leftText !== '' ? doc.heightOfString(String(leftText), { width: leftW }) : 0;
+  const hR = rightText != null && rightText !== '' ? doc.heightOfString(String(rightText), { width: rw }) : 0;
+  const lineGap = 4;
+  const rowH = Math.max(hL, hR, 11) + lineGap;
+  const y0 = ensureSpace(doc, reportDate, y, rowH);
+  if (leftText != null && leftText !== '') {
+    doc.text(String(leftText), MARGIN, y0, { width: leftW });
+  }
+  if (rightText != null && rightText !== '') {
+    doc.text(String(rightText), rx, y0, { width: rw });
+  }
+  return y0 + rowH;
+}
+
 export async function generateWorkOrderReport(orderData) {
   const documentsForReport = orderData.documents || [];
   const blueprintCandidates = documentsForReport.filter(
@@ -350,16 +376,34 @@ export async function generateWorkOrderReport(orderData) {
     doc.fontSize(11).font('Helvetica-Bold').fillColor('black').text('REPORTE DE ORDEN DE TRABAJO', MARGIN, y);
     y += 22;
 
-    doc.font('Helvetica').fontSize(10);
-    doc.text(`Fecha: ${formatDate(order.completion_date)}`, MARGIN, y);
-    doc.text(`Cliente: ${order.client_name || '-'}${order.company_name ? ' - ' + order.company_name : ''}`, MARGIN + 200, y);
-    y += 16;
-    doc.text(`N° Orden de Servicio del Cliente: ${order.client_service_order_number || '-'}`, MARGIN, y);
-    doc.text(`Técnico CIGSA: ${order.technician_name || '-'}`, MARGIN + 280, y);
-    y += 16;
-    doc.text(`Serie WO: ${order.order_number || '-'}`, MARGIN, y);
-    doc.text(`Área / Ubicación: ${order.service_location || '-'}`, MARGIN + 200, y);
-    y += 20;
+    const headLeftW = 235;
+    const headRightX = MARGIN + headLeftW + 10;
+    const headRightW = PAGE_WIDTH - MARGIN - headRightX;
+    y = drawReportHeaderDataRow(
+      doc,
+      reportDate,
+      y,
+      `Fecha: ${formatDate(order.completion_date)}`,
+      `Cliente: ${order.client_name || '-'}${order.company_name ? ' - ' + order.company_name : ''}`,
+      { leftW: headLeftW, rightX: headRightX, rightW: headRightW }
+    );
+    y = drawReportHeaderDataRow(
+      doc,
+      reportDate,
+      y,
+      `N° Orden de Servicio del Cliente: ${order.client_service_order_number || '-'}`,
+      `Técnico CIGSA: ${order.technician_name || '-'}`,
+      { leftW: headLeftW, rightX: headRightX, rightW: headRightW }
+    );
+    y = drawReportHeaderDataRow(
+      doc,
+      reportDate,
+      y,
+      `Serie WO: ${order.order_number || '-'}`,
+      `Área / Ubicación: ${order.service_location || '-'}`,
+      { leftW: headLeftW, rightX: headRightX, rightW: headRightW }
+    );
+    y += 8;
 
     doc.font('Helvetica-Bold').text('Equipo', MARGIN, y);
     y += 14;
