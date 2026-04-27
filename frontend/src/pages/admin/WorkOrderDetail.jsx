@@ -577,6 +577,7 @@ export default function WorkOrderDetail() {
     .slice(0, 1);
 
   const workingDays = getWorkingDaysCount(order);
+  const showHousingMetrology = isMachiningRepairByTypeName(order.service_type_name);
 
   const handleDownloadReport = async () => {
     try {
@@ -1084,7 +1085,7 @@ export default function WorkOrderDetail() {
                       <button type="button" className="btn-secondary" style={{ marginLeft: 'auto', fontSize: '0.9rem' }} onClick={() => openEditMeasurementModal(measurement)}>Editar</button>
                     </div>
 
-                    {hasHousings ? (
+                    {showHousingMetrology && hasHousings ? (
                       <div style={{ overflowX: 'auto' }}>
                         <table className="data-table">
                           <thead>
@@ -1130,7 +1131,7 @@ export default function WorkOrderDetail() {
                         {(measurement.notes != null && measurement.notes !== '') && (
                           <div style={{ marginTop: 8 }}><strong>Observaciones:</strong> {measurement.notes}</div>
                         )}
-                        {!hasHousings && (
+                        {showHousingMetrology && !hasHousings && (
                           <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
                             No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
                           </p>
@@ -1158,7 +1159,7 @@ export default function WorkOrderDetail() {
                       <button type="button" className="btn-secondary" style={{ marginLeft: 'auto', fontSize: '0.9rem' }} onClick={() => openEditMeasurementModal(measurement)}>Editar</button>
                     </div>
 
-                    {hasHousings ? (
+                    {showHousingMetrology && hasHousings ? (
                       <div style={{ overflowX: 'auto' }}>
                         <table className="data-table">
                           <thead>
@@ -1204,7 +1205,7 @@ export default function WorkOrderDetail() {
                         {(measurement.notes != null && measurement.notes !== '') && (
                           <div style={{ marginTop: 8 }}><strong>Observaciones:</strong> {measurement.notes}</div>
                         )}
-                        {!hasHousings && (
+                        {showHousingMetrology && !hasHousings && (
                           <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
                             No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
                           </p>
@@ -1678,6 +1679,7 @@ export default function WorkOrderDetail() {
                 placeholder="Observaciones de la medición"
               />
             </div>
+            {showHousingMetrology ? (
             <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
               <table className="data-table" style={{ width: '100%', tableLayout: 'fixed' }}>
                 <thead>
@@ -1766,6 +1768,11 @@ export default function WorkOrderDetail() {
                 </tbody>
               </table>
             </div>
+            ) : (
+              <p style={{ color: 'var(--text-light)', marginBottom: 0 }}>
+                Para este tipo de servicio no se editan medidas por alojamiento; solo observaciones.
+              </p>
+            )}
             <div className="modal-actions" style={{ marginTop: 16 }}>
               <button type="button" onClick={() => { setShowEditMeasurementModal(false); setEditingMeasurement(null); }} disabled={savingMeasurement}>Cerrar</button>
               <button type="button" className="btn-primary" onClick={saveEditMeasurement} disabled={savingMeasurement}>

@@ -421,6 +421,7 @@ export default function TechnicianWorkOrderDetail() {
     .sort((a, b) => getMeasurementDate(b) - getMeasurementDate(a))
     .slice(0, 1);
   const serviceHousings = order.service_housings || [];
+  const showHousingMetrology = isMachiningRepairByTypeName(order.service_type_name);
 
   const serviceLabelForMeasurementRow = (row) => {
     const fromJoin = [row.service_code, row.service_name].filter(Boolean).join(' — ');
@@ -660,7 +661,7 @@ export default function TechnicianWorkOrderDetail() {
                 const hasHousings = Array.isArray(housings) && housings.length > 0;
                 return (
                 <div key={m.id} className="measurement-card">
-                  {hasHousings ? (
+                  {showHousingMetrology && hasHousings ? (
                     <>
                       <div style={{ fontWeight: 600, marginBottom: 8 }}>
                         {new Date(m.measurement_date).toLocaleString('es-PA')}
@@ -681,9 +682,11 @@ export default function TechnicianWorkOrderDetail() {
                       <div style={{ marginTop: 8 }}>
                         <strong>Observaciones:</strong> {m.notes || '-'}
                       </div>
-                      <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
-                        No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
-                      </p>
+                      {showHousingMetrology && !hasHousings && (
+                        <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
+                          No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -700,7 +703,7 @@ export default function TechnicianWorkOrderDetail() {
                 const hasHousings = Array.isArray(housings) && housings.length > 0;
                 return (
                 <div key={m.id} className="measurement-card">
-                  {hasHousings ? (
+                  {showHousingMetrology && hasHousings ? (
                     <>
                       <div style={{ fontWeight: 600, marginBottom: 8 }}>
                         {new Date(m.measurement_date).toLocaleString('es-PA')}
@@ -720,9 +723,11 @@ export default function TechnicianWorkOrderDetail() {
                       <div style={{ marginTop: 8 }}>
                         <strong>Observaciones:</strong> {m.notes || '-'}
                       </div>
-                      <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
-                        No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
-                      </p>
+                      {showHousingMetrology && !hasHousings && (
+                        <p style={{ color: 'var(--text-light)', marginTop: 8, marginBottom: 0 }}>
+                          No se cargaron valores por alojamiento (X1, Y1, unidad) en esta medición.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1018,7 +1023,7 @@ export default function TechnicianWorkOrderDetail() {
                 <option value="final">Medición Final</option>
               </select>
 
-              {serviceHousings && serviceHousings.length > 0 ? (
+              {showHousingMetrology && serviceHousings && serviceHousings.length > 0 ? (
                 compactMeasurementsLayout ? (
                   <div className="technician-housing-cards technician-housing-cards--form">
                     {serviceHousings.map((h) => {
@@ -1158,8 +1163,12 @@ export default function TechnicianWorkOrderDetail() {
                     </table>
                   </div>
                 )
-              ) : (
+              ) : showHousingMetrology ? (
                 <p className="empty-message">Esta orden no tiene alojamientos configurados.</p>
+              ) : (
+                <p className="empty-message" style={{ marginTop: 12 }}>
+                  Para este tipo de servicio no se registran medidas por alojamiento. Use las observaciones para detallar la medición.
+                </p>
               )}
 
               <textarea

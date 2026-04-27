@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { getConnection } from '../config/database.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { activityLogger, logActivity } from '../middleware/logger.js';
+import { isMachiningRepairTypeName } from '../lib/serviceTypeMachining.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,18 +59,6 @@ function completionBeforeStartError(effStart, effCompletion) {
     return 'La fecha de completación no puede ser anterior a la fecha de inicio.';
   }
   return null;
-}
-
-const MACHINING_SERVICE_TYPE_LABEL = 'Reparación por Mecanizado';
-function normalizeServiceTypeName(s) {
-  return String(s || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
-function isMachiningRepairTypeName(name) {
-  return normalizeServiceTypeName(name) === normalizeServiceTypeName(MACHINING_SERVICE_TYPE_LABEL);
 }
 
 /**
@@ -287,12 +276,13 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
     }
 
     const [orders] = await pool.query(`
-      SELECT wo.*, c.name as client_name, c.company_name, c.email as client_email, c.phone as client_phone,
+      SELECT wo.*, st.name as service_type_name, c.name as client_name, c.company_name, c.email as client_email, c.phone as client_phone,
         e.serial_number, e.description as equipment_description,
         CONCAT(eb.name, ' ', em.model_name, ' - ', e.serial_number) as equipment_name,
         em.model_name, em.components as equipment_components, eb.name as brand_name, eb.id as brand_id, em.id as model_id,
         COALESCE(svc_techs.tech_names, u.full_name) as technician_name, u.phone as technician_phone, creator.full_name as created_by_name
       FROM work_orders wo
+      LEFT JOIN service_types st ON wo.service_type_id = st.id
       LEFT JOIN clients c ON wo.client_id = c.id
       LEFT JOIN equipment e ON wo.equipment_id = e.id
       LEFT JOIN equipment_models em ON e.model_id = em.id

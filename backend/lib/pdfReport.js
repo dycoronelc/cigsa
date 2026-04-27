@@ -7,6 +7,7 @@ import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { isMachiningRepairTypeName } from './serviceTypeMachining.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -314,8 +315,9 @@ export async function generateWorkOrderReport(orderData) {
     });
 
     const order = orderData;
+    const showHousingMetrology = isMachiningRepairTypeName(order.service_type_name);
     const services = order.services || [];
-    const serviceHousings = order.service_housings || [];
+    const serviceHousings = showHousingMetrology ? order.service_housings || [] : [];
     const measurements = order.measurements || [];
     const measurementHasData = (m) => {
       const housings = m.housing_measurements || m.housingMeasurements || [];
@@ -378,6 +380,7 @@ export async function generateWorkOrderReport(orderData) {
       doc.text('(Sin servicios registrados)', MARGIN, y);
       y += 14;
     } else {
+      const bulletW = CONTENT_WIDTH - 20;
       services.forEach((svc) => {
         const name = svc.service_name || svc.service_code || 'Servicio';
         const count = (svc.housings && svc.housings.length) || svc.housing_count || 0;
@@ -393,36 +396,45 @@ export async function generateWorkOrderReport(orderData) {
                 .join(', ')
             : '';
         const techSuffix = techBits ? ` — ${techBits}` : '';
-        doc.text(`• ${name}${techSuffix} (${count} alojamiento${count !== 1 ? 's' : ''})`, MARGIN + 10, y);
-        y += 14;
+        const housingSuffix = showHousingMetrology
+          ? ` (${count} alojamiento${count !== 1 ? 's' : ''})`
+          : '';
+        const line = `• ${name}${techSuffix}${housingSuffix}`;
+        doc.font('Helvetica').fontSize(10);
+        const blockH = doc.heightOfString(line, { width: bulletW });
+        y = ensureSpace(doc, reportDate, y, blockH + 6);
+        doc.text(line, MARGIN + 10, y, { width: bulletW });
+        y += blockH + 6;
       });
     }
     y += 8;
 
-    const tableEstimatedHeight = 20 + services.length * 28 + 20;
-    y = ensureSpace(doc, reportDate, y, tableEstimatedHeight);
+    if (showHousingMetrology) {
+      const tableEstimatedHeight = 20 + services.length * 28 + 20;
+      y = ensureSpace(doc, reportDate, y, tableEstimatedHeight);
 
-    doc.font('Helvetica-Bold').fontSize(9);
-    doc.rect(MARGIN, y, CONTENT_WIDTH, 18).fillAndStroke('#eee', '#333');
-    doc.fillColor('black').text('Servicio', MARGIN + 8, y + 4, { width: 280 });
-    doc.text('Aloj. cotizados', MARGIN + 290, y + 4, { width: 80 });
-    doc.text('Aloj. ejecutados', MARGIN + 372, y + 4);
-    y += 20;
-    doc.font('Helvetica').fontSize(9).fillColor('black');
-    const serviceColWidth = 280;
-    services.forEach((svc) => {
-      const cot = svc.housing_count || 0;
-      const ejec = countExecutedHousingsWithFinalMeasurement(svc, finalMeasurements[0] || null);
-      const name = svc.service_name || svc.service_code || '-';
-      const nameHeight = doc.heightOfString(name, { width: serviceColWidth });
-      const rowHeight = Math.max(20, Math.ceil(nameHeight) + 10);
-      doc.rect(MARGIN, y, CONTENT_WIDTH, rowHeight).stroke();
-      doc.text(name, MARGIN + 8, y + 5, { width: serviceColWidth });
-      doc.text(String(cot), MARGIN + 290, y + 5, { width: 80 });
-      doc.text(String(ejec), MARGIN + 372, y + 5);
-      y += rowHeight;
-    });
-    y += 16;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.rect(MARGIN, y, CONTENT_WIDTH, 18).fillAndStroke('#eee', '#333');
+      doc.fillColor('black').text('Servicio', MARGIN + 8, y + 4, { width: 280 });
+      doc.text('Aloj. cotizados', MARGIN + 290, y + 4, { width: 80 });
+      doc.text('Aloj. ejecutados', MARGIN + 372, y + 4);
+      y += 20;
+      doc.font('Helvetica').fontSize(9).fillColor('black');
+      const serviceColWidth = 280;
+      services.forEach((svc) => {
+        const cot = svc.housing_count || 0;
+        const ejec = countExecutedHousingsWithFinalMeasurement(svc, finalMeasurements[0] || null);
+        const name = svc.service_name || svc.service_code || '-';
+        const nameHeight = doc.heightOfString(name, { width: serviceColWidth });
+        const rowHeight = Math.max(20, Math.ceil(nameHeight) + 10);
+        doc.rect(MARGIN, y, CONTENT_WIDTH, rowHeight).stroke();
+        doc.text(name, MARGIN + 8, y + 5, { width: serviceColWidth });
+        doc.text(String(cot), MARGIN + 290, y + 5, { width: 80 });
+        doc.text(String(ejec), MARGIN + 372, y + 5);
+        y += rowHeight;
+      });
+      y += 16;
+    }
 
     if (order.description) {
       const descHeight = 50;
@@ -482,6 +494,7 @@ export async function generateWorkOrderReport(orderData) {
       y += 16;
     }
 
+    if (showHousingMetrology) {
     doc.fontSize(12).font('Helvetica-Bold').fillColor('black').text('METROLOGÍA DE ALOJAMIENTOS', MARGIN, y);
     y += 18;
     doc.fontSize(10).font('Helvetica').text(`Equipo: ${order.serial_number || '-'}  |  N° Orden Cliente: ${order.client_service_order_number || '-'}`, MARGIN, y);
@@ -697,6 +710,8 @@ export async function generateWorkOrderReport(orderData) {
           y += 8;
         }
       });
+    }
+
     }
 
     // Firmas Capataz y Superintendente (después de medidas finales): títulos siempre; imagen/datos solo si existen
