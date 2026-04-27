@@ -912,7 +912,6 @@ export async function generateWorkOrderReport(orderData) {
     const photoGap = 8;
     const photoCellW = (CONTENT_WIDTH - (PHOTOS_PER_ROW - 1) * photoGap) / PHOTOS_PER_ROW;
     const photoCellH = 110;
-    const photoRowHeight = photoCellH + 18;
 
     doc.addPage();
     y = CONTENT_TOP + TITLE_MARGIN_BELOW_HEADER;
@@ -937,29 +936,43 @@ export async function generateWorkOrderReport(orderData) {
           rows.push(g.photos.slice(i, i + PHOTOS_PER_ROW));
         }
         rows.forEach((rowPhotos) => {
-          y = ensureSpace(doc, reportDate, y, photoRowHeight);
+          const buildCaption = (photo) => {
+            const typeLabel = photoTypes[photo.photo_type] || photo.photo_type || 'Foto';
+            const desc = (photo.description || '').trim();
+            return desc ? `${typeLabel}: ${desc}` : typeLabel;
+          };
+          const captions = rowPhotos.map(buildCaption);
+          doc.font('Helvetica').fontSize(8).fillColor('#333');
+          let maxCapH = doc.currentLineHeight();
+          for (const c of captions) {
+            const h = doc.heightOfString(c, { width: photoCellW, align: 'center' });
+            maxCapH = Math.max(maxCapH, h);
+          }
+          const capGap = 6;
+          const afterCapGap = 8;
+          const rowBlockH = photoCellH + capGap + maxCapH + afterCapGap;
+          y = ensureSpace(doc, reportDate, y, rowBlockH);
+          const imageY = y;
           rowPhotos.forEach((photo, colIndex) => {
             const absPath = getPhotoFilePath(photo);
             const x = MARGIN + colIndex * (photoCellW + photoGap);
             if (absPath && fs.existsSync(absPath)) {
               try {
-                doc.image(absPath, x, y, { fit: [photoCellW, photoCellH], align: 'center', valign: 'top' });
+                doc.image(absPath, x, imageY, { fit: [photoCellW, photoCellH], align: 'center', valign: 'top' });
               } catch (_) {
-                doc.font('Helvetica').fontSize(7).fillColor('#888').text('(Error)', x, y + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
+                doc.font('Helvetica').fontSize(7).fillColor('#888').text('(Error)', x, imageY + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
               }
             } else {
-              doc.font('Helvetica').fontSize(7).fillColor('#888').text('(No encontrada)', x, y + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
+              doc.font('Helvetica').fontSize(7).fillColor('#888').text('(No encontrada)', x, imageY + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
             }
           });
-          y += photoCellH + 6;
+          const capY = imageY + photoCellH + capGap;
           doc.font('Helvetica').fontSize(8).fillColor('#333');
           rowPhotos.forEach((photo, colIndex) => {
-            const typeLabel = photoTypes[photo.photo_type] || photo.photo_type || 'Foto';
-            const caption = (photo.description ? `${typeLabel}: ${(photo.description || '').slice(0, 25)}` : typeLabel).slice(0, 28);
             const x = MARGIN + colIndex * (photoCellW + photoGap);
-            doc.text(caption, x, y, { width: photoCellW, align: 'center' });
+            doc.text(captions[colIndex], x, capY, { width: photoCellW, align: 'center' });
           });
-          y += 14;
+          y = capY + maxCapH + afterCapGap;
         });
         y += 4;
       }
