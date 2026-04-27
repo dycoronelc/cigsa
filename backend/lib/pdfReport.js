@@ -190,6 +190,81 @@ function countExecutedHousingsWithFinalMeasurement(svc, finalMeasurement) {
   return withData.size;
 }
 
+const PHOTO_GROUP_NONE = '__none__';
+
+function photoGroupKey(photo) {
+  const id = photo.work_order_service_id ?? photo.workOrderServiceId;
+  if (id != null && id !== '') return String(id);
+  return PHOTO_GROUP_NONE;
+}
+
+function photoServiceTitleForGroup(firstPhoto, orderServices) {
+  const p = firstPhoto;
+  const code = p?.photo_service_code ?? p?.photoServiceCode;
+  const name = p?.photo_service_name ?? p?.photoServiceName;
+  if (code || name) {
+    const t = [code, name].filter(Boolean).join(' — ');
+    if (t) return t;
+  }
+  const wosId = p?.work_order_service_id ?? p?.workOrderServiceId;
+  if (wosId != null && Array.isArray(orderServices)) {
+    const s = orderServices.find((x) => String(x.id) === String(wosId));
+    if (s) {
+      const t = [s.service_code, s.service_name].filter(Boolean).join(' — ');
+      if (t) return t;
+    }
+  }
+  return 'Sin servicio asignado';
+}
+
+/**
+ * Agrupa fotos por servicio (línea work_order_services) y ordena secciones como en la lista de servicios de la OT.
+ */
+function buildPhotoAnnexGroups(photos, orderServices) {
+  const list = Array.isArray(photos) ? photos : [];
+  const byKey = new Map();
+  for (const p of list) {
+    const k = photoGroupKey(p);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(p);
+  }
+  for (const arr of byKey.values()) {
+    arr.sort((a, b) => {
+      const ta = new Date(a.created_at || a.createdAt || 0).getTime();
+      const tb = new Date(b.created_at || b.createdAt || 0).getTime();
+      return ta - tb;
+    });
+  }
+  const svcs = Array.isArray(orderServices) ? orderServices : [];
+  const ordered = [];
+  const used = new Set();
+  for (const s of svcs) {
+    if (s && s.id != null) {
+      const k = String(s.id);
+      const arr = byKey.get(k);
+      if (arr && arr.length > 0) {
+        ordered.push({ key: k, title: photoServiceTitleForGroup(arr[0], orderServices), photos: arr });
+        used.add(k);
+      }
+    }
+  }
+  const rest = [...byKey.keys()].filter((k) => !used.has(k));
+  rest.sort((a, b) => {
+    if (a === PHOTO_GROUP_NONE) return 1;
+    if (b === PHOTO_GROUP_NONE) return -1;
+    const ta = photoServiceTitleForGroup(byKey.get(a)[0], orderServices);
+    const tb = photoServiceTitleForGroup(byKey.get(b)[0], orderServices);
+    return String(ta).localeCompare(String(tb), 'es');
+  });
+  for (const k of rest) {
+    const arr = byKey.get(k);
+    if (arr && arr.length > 0) {
+      ordered.push({ key: k, title: photoServiceTitleForGroup(arr[0], orderServices), photos: arr });
+    }
+  }
+  return ordered;
+}
+
 /** Altura de texto con ajuste de línea (PDFKit); mínimo una línea. */
 function heightOfWrappedText(doc, text, width) {
   const s = text != null && text !== '' ? String(text) : '-';
@@ -850,36 +925,44 @@ export async function generateWorkOrderReport(orderData) {
       doc.font('Helvetica').fontSize(9).fillColor('#555').text('No hay fotos adjuntas para esta orden de trabajo.', MARGIN, y);
       y += 20;
     } else {
-      const rows = [];
-      for (let i = 0; i < photosForAnnex.length; i += PHOTOS_PER_ROW) {
-        rows.push(photosForAnnex.slice(i, i + PHOTOS_PER_ROW));
-      }
-      rows.forEach((rowPhotos) => {
-        y = ensureSpace(doc, reportDate, y, photoRowHeight);
-        const rowStartY = y;
-        rowPhotos.forEach((photo, colIndex) => {
-          const absPath = getPhotoFilePath(photo);
-          const x = MARGIN + colIndex * (photoCellW + photoGap);
-          if (absPath && fs.existsSync(absPath)) {
-            try {
-              doc.image(absPath, x, y, { fit: [photoCellW, photoCellH], align: 'center', valign: 'top' });
-            } catch (_) {
-              doc.font('Helvetica').fontSize(7).fillColor('#888').text('(Error)', x, y + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
+      const photoGroups = buildPhotoAnnexGroups(photosForAnnex, services);
+      for (const g of photoGroups) {
+        const titleH = doc.heightOfString(g.title, { width: CONTENT_WIDTH });
+        y = ensureSpace(doc, reportDate, y, titleH + 12);
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('black').text(g.title, MARGIN, y, { width: CONTENT_WIDTH });
+        y += titleH + 10;
+
+        const rows = [];
+        for (let i = 0; i < g.photos.length; i += PHOTOS_PER_ROW) {
+          rows.push(g.photos.slice(i, i + PHOTOS_PER_ROW));
+        }
+        rows.forEach((rowPhotos) => {
+          y = ensureSpace(doc, reportDate, y, photoRowHeight);
+          rowPhotos.forEach((photo, colIndex) => {
+            const absPath = getPhotoFilePath(photo);
+            const x = MARGIN + colIndex * (photoCellW + photoGap);
+            if (absPath && fs.existsSync(absPath)) {
+              try {
+                doc.image(absPath, x, y, { fit: [photoCellW, photoCellH], align: 'center', valign: 'top' });
+              } catch (_) {
+                doc.font('Helvetica').fontSize(7).fillColor('#888').text('(Error)', x, y + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
+              }
+            } else {
+              doc.font('Helvetica').fontSize(7).fillColor('#888').text('(No encontrada)', x, y + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
             }
-          } else {
-            doc.font('Helvetica').fontSize(7).fillColor('#888').text('(No encontrada)', x, y + photoCellH / 2 - 4, { width: photoCellW, align: 'center' });
-          }
+          });
+          y += photoCellH + 6;
+          doc.font('Helvetica').fontSize(8).fillColor('#333');
+          rowPhotos.forEach((photo, colIndex) => {
+            const typeLabel = photoTypes[photo.photo_type] || photo.photo_type || 'Foto';
+            const caption = (photo.description ? `${typeLabel}: ${(photo.description || '').slice(0, 25)}` : typeLabel).slice(0, 28);
+            const x = MARGIN + colIndex * (photoCellW + photoGap);
+            doc.text(caption, x, y, { width: photoCellW, align: 'center' });
+          });
+          y += 14;
         });
-        y += photoCellH + 6;
-        doc.font('Helvetica').fontSize(8).fillColor('#333');
-        rowPhotos.forEach((photo, colIndex) => {
-          const typeLabel = photoTypes[photo.photo_type] || photo.photo_type || 'Foto';
-          const caption = (photo.description ? `${typeLabel}: ${(photo.description || '').slice(0, 25)}` : typeLabel).slice(0, 28);
-          const x = MARGIN + colIndex * (photoCellW + photoGap);
-          doc.text(caption, x, y, { width: photoCellW, align: 'center' });
-        });
-        y += 14;
-      });
+        y += 4;
+      }
     }
 
     drawFooter(doc);
