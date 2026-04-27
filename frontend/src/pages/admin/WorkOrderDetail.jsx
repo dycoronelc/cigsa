@@ -11,9 +11,6 @@ import { isMachiningRepairByTypeName, isMachiningRepairServiceType } from '../..
 import { SHIFT_DAY, SHIFT_NIGHT, shiftLabel } from '../../utils/serviceTechnicianShift';
 import './WorkOrderDetail.css';
 
-/** Estados en los que se permite generar el reporte PDF (cabecera usa fecha de completación). */
-const REPORT_DOWNLOAD_STATUSES = new Set(['completed', 'accepted']);
-
 export default function WorkOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -581,18 +578,7 @@ export default function WorkOrderDetail() {
 
   const workingDays = getWorkingDaysCount(order);
 
-  const canDownloadReport =
-    REPORT_DOWNLOAD_STATUSES.has(order.status) && Boolean(order.completion_date);
-
   const handleDownloadReport = async () => {
-    if (!canDownloadReport) {
-      showError(
-        !REPORT_DOWNLOAD_STATUSES.has(order.status)
-          ? 'El reporte PDF solo está disponible cuando la orden está en estado Completada o Aceptada.'
-          : 'Registre la fecha de completación de la orden para generar el reporte PDF.'
-      );
-      return;
-    }
     try {
       const response = await api.get(`/work-orders/${id}/report`, { responseType: 'blob' });
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -636,14 +622,7 @@ export default function WorkOrderDetail() {
             type="button"
             className="btn-secondary"
             onClick={handleDownloadReport}
-            disabled={!canDownloadReport}
-            title={
-              canDownloadReport
-                ? 'Descargar reporte en PDF (fecha de cabecera: completación)'
-                : !REPORT_DOWNLOAD_STATUSES.has(order.status)
-                  ? 'Disponible solo cuando la OT esté Completada o Aceptada'
-                  : 'Registre la fecha de completación para habilitar el reporte PDF'
-            }
+            title="Descargar reporte en PDF (fecha de completación en cabecera si está registrada)"
           >
             📄 Reporte PDF
           </button>

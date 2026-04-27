@@ -322,18 +322,6 @@ router.get('/:id/report', authenticateToken, async (req, res) => {
       throw e;
     }
 
-    const reportAllowedStatuses = new Set(['completed', 'accepted']);
-    if (!reportAllowedStatuses.has(order.status)) {
-      return res.status(403).json({
-        error: 'El reporte PDF solo está disponible cuando la orden está en estado Completada o Aceptada. La fecha del reporte es la de completación.',
-      });
-    }
-    if (!order.completion_date) {
-      return res.status(403).json({
-        error: 'No se puede generar el reporte PDF sin fecha de completación registrada en la orden.',
-      });
-    }
-
     const [wosRows] = await pool.query(`
       SELECT wos.id, wos.service_id, wos.housing_count, s.name as service_name, s.code as service_code, s.description as service_description
       FROM work_order_services wos
