@@ -1743,6 +1743,92 @@ router.post('/:id/photos', authenticateToken, upload.single('photo'), async (req
 });
 
 // Delete photo
+router.put('/:id/photos/:photoId', authenticateToken, async (req, res) => {
+  try {
+    const { photoType, description, workOrderServiceId } = req.body;
+    const pool = await getConnection();
+    const woIdInt = parseInt(req.params.id, 10);
+    const photoIdInt = parseInt(req.params.photoId, 10);
+
+    const [orders] = await pool.query('SELECT assigned_technician_id FROM work_orders WHERE id = ?', [req.params.id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+
+    if (req.user.role === 'technician') {
+      const ok = await technicianHasAccessToWorkOrder(pool, woIdInt, req.user.id);
+      if (!ok) return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const [photos] = await pool.query(
+      'SELECT id, work_order_service_id FROM work_order_photos WHERE work_order_id = ? AND id = ?',
+      [woIdInt, photoIdInt]
+    );
+    if (photos.length === 0) {
+      return res.status(404).json({ error: 'Photo not found' });
+    }
+
+    const [svcCountRows] = await pool.query(
+      'SELECT COUNT(*) AS c FROM work_order_services WHERE work_order_id = ?',
+      [woIdInt]
+    );
+    const svcCount = svcCountRows[0]?.c || 0;
+    const rawWos = workOrderServiceId ?? req.body.work_order_service_id;
+    let wosIdVal = null;
+
+    if (rawWos !== undefined && rawWos !== null && String(rawWos).trim() !== '') {
+      const wosParsed = parseInt(String(rawWos), 10);
+      const [wosRows] = await pool.query(
+        'SELECT id FROM work_order_services WHERE id = ? AND work_order_id = ?',
+        [wosParsed, woIdInt]
+      );
+      if (wosRows.length === 0) {
+        return res.status(400).json({ error: 'El servicio seleccionado no pertenece a esta orden.' });
+      }
+      wosIdVal = wosParsed;
+    }
+
+    if (svcCount > 1 && wosIdVal == null) {
+      return res.status(400).json({ error: 'Seleccione el servicio al que corresponde la foto.' });
+    }
+
+    if (svcCount === 1 && wosIdVal == null) {
+      const [one] = await pool.query(
+        'SELECT id FROM work_order_services WHERE work_order_id = ? ORDER BY id LIMIT 1',
+        [woIdInt]
+      );
+      if (one.length > 0) wosIdVal = one[0].id;
+    }
+
+    try {
+      await pool.query(
+        `UPDATE work_order_photos
+         SET work_order_service_id = ?, photo_type = ?, description = ?
+         WHERE id = ? AND work_order_id = ?`,
+        [wosIdVal, photoType || 'during_service', description || null, photoIdInt, woIdInt]
+      );
+    } catch (updErr) {
+      if (updErr.code === 'ER_BAD_FIELD_ERROR' && updErr.sqlMessage && updErr.sqlMessage.includes('work_order_service_id')) {
+        await pool.query(
+          `UPDATE work_order_photos
+           SET photo_type = ?, description = ?
+           WHERE id = ? AND work_order_id = ?`,
+          [photoType || 'during_service', description || null, photoIdInt, woIdInt]
+        );
+      } else {
+        throw updErr;
+      }
+    }
+
+    await logActivity(req.user.id, 'UPDATE', 'photo', photoIdInt, 'Updated photo metadata', req.ip);
+    res.status(200).json({ message: 'Photo updated successfully' });
+  } catch (error) {
+    console.error('Update photo error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete photo
 router.delete('/:id/photos/:photoId', authenticateToken, async (req, res) => {
   try {
     const pool = await getConnection();

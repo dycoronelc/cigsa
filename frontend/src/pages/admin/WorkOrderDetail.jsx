@@ -50,6 +50,9 @@ export default function WorkOrderDetail() {
   const [superintendentSigSignedBy, setSuperintendentSigSignedBy] = useState('');
   const [superintendentSigUploading, setSuperintendentSigUploading] = useState(false);
   const [adminPhotoUploading, setAdminPhotoUploading] = useState(false);
+  const [editingPhoto, setEditingPhoto] = useState(null);
+  const [photoEditData, setPhotoEditData] = useState({ workOrderServiceId: '', photoType: 'during_service', description: '' });
+  const [photoEditSaving, setPhotoEditSaving] = useState(false);
 
   const isDocVisibleToTechnician = (d) => {
     const v = d?.is_visible_to_technician;
@@ -515,6 +518,46 @@ export default function WorkOrderDetail() {
       'Eliminar foto',
       { confirmText: 'Eliminar', cancelText: 'Cancelar', confirmDanger: true }
     );
+  };
+
+  const openPhotoEdit = (photo) => {
+    setEditingPhoto(photo);
+    setPhotoEditData({
+      workOrderServiceId: photo.work_order_service_id ? String(photo.work_order_service_id) : '',
+      photoType: photo.photo_type || 'during_service',
+      description: photo.description || ''
+    });
+  };
+
+  const closePhotoEdit = () => {
+    if (photoEditSaving) return;
+    setEditingPhoto(null);
+    setPhotoEditData({ workOrderServiceId: '', photoType: 'during_service', description: '' });
+  };
+
+  const savePhotoEdit = async (e) => {
+    e.preventDefault();
+    if (!editingPhoto) return;
+    const serviceCount = (order?.services || []).filter((s) => s.id).length;
+    if (serviceCount > 1 && !photoEditData.workOrderServiceId) {
+      showError('Seleccione el servicio al que corresponde la foto.');
+      return;
+    }
+    setPhotoEditSaving(true);
+    try {
+      await api.put(`/work-orders/${id}/photos/${editingPhoto.id}`, {
+        workOrderServiceId: photoEditData.workOrderServiceId || null,
+        photoType: photoEditData.photoType || 'during_service',
+        description: photoEditData.description || ''
+      });
+      showSuccess('Foto actualizada');
+      closePhotoEdit();
+      fetchOrder();
+    } catch (err) {
+      showError(err.response?.data?.error || 'Error al actualizar la foto');
+    } finally {
+      setPhotoEditSaving(false);
+    }
   };
 
   const submitAdminPhoto = async (e) => {
@@ -1284,22 +1327,38 @@ export default function WorkOrderDetail() {
                         Servicio: {photo.photo_service_code ? `${photo.photo_service_code} — ` : ''}{photo.photo_service_name || '—'}
                       </p>
                     ) : null}
+                    <p style={{ fontSize: 12, margin: '0' }}>
+                      Tipo: {photo.photo_type === 'inspection' ? 'Inspección' : photo.photo_type === 'completion' ? 'Finalización' : 'Durante el servicio'}
+                    </p>
                     <p>{photo.description || 'Sin descripción'}</p>
-                    <button
-                      type="button"
-                      className="photo-delete-btn"
-                      onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo.id); }}
-                      title="Eliminar foto"
-                      aria-label="Eliminar foto"
-                    >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        <line x1="10" y1="11" x2="10" y2="17"></line>
-                        <line x1="14" y1="11" x2="14" y2="17"></line>
-                      </svg>
-                      Eliminar
-                    </button>
+                    <div className="photo-actions">
+                      <button
+                        type="button"
+                        className="photo-action-btn"
+                        onClick={(e) => { e.stopPropagation(); openPhotoEdit(photo); }}
+                        title="Editar foto"
+                        aria-label="Editar foto"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                          <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L10 16l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        className="photo-action-btn photo-delete-btn"
+                        onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo.id); }}
+                        title="Eliminar foto"
+                        aria-label="Eliminar foto"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          <line x1="10" y1="11" x2="10" y2="17"></line>
+                          <line x1="14" y1="11" x2="14" y2="17"></line>
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1329,6 +1388,62 @@ export default function WorkOrderDetail() {
                   onClick={(e) => e.stopPropagation()}
                   className="photo-lightbox-img"
                 />
+              </div>
+            )}
+
+            {editingPhoto && (
+              <div className="modal-overlay" onClick={closePhotoEdit}>
+                <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+                  <h2>Editar foto</h2>
+                  <form onSubmit={savePhotoEdit}>
+                    {(order.services || []).filter((s) => s.id).length > 1 && (
+                      <div className="form-group">
+                        <label htmlFor="edit-photo-service">Servicio</label>
+                        <select
+                          id="edit-photo-service"
+                          value={photoEditData.workOrderServiceId}
+                          onChange={(e) => setPhotoEditData((prev) => ({ ...prev, workOrderServiceId: e.target.value }))}
+                          required
+                        >
+                          <option value="">Seleccione…</option>
+                          {(order.services || []).filter((s) => s.id).map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.service_code ? `${s.service_code} — ` : ''}{s.service_name || 'Servicio'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <div className="form-group">
+                      <label htmlFor="edit-photo-type">Tipo</label>
+                      <select
+                        id="edit-photo-type"
+                        value={photoEditData.photoType}
+                        onChange={(e) => setPhotoEditData((prev) => ({ ...prev, photoType: e.target.value }))}
+                      >
+                        <option value="inspection">Inspección</option>
+                        <option value="during_service">Durante el servicio</option>
+                        <option value="completion">Finalización</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="edit-photo-description">Descripción</label>
+                      <textarea
+                        id="edit-photo-description"
+                        rows={3}
+                        value={photoEditData.description}
+                        onChange={(e) => setPhotoEditData((prev) => ({ ...prev, description: e.target.value }))}
+                        placeholder="Descripción de la foto"
+                      />
+                    </div>
+                    <div className="modal-actions">
+                      <button type="button" onClick={closePhotoEdit} disabled={photoEditSaving}>Cancelar</button>
+                      <button type="submit" className="btn-primary" disabled={photoEditSaving}>
+                        {photoEditSaving ? 'Guardando...' : 'Guardar'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
             )}
           </div>
