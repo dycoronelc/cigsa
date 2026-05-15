@@ -1010,6 +1010,17 @@ export default function WorkOrderDetail() {
                             </button>
                           </div>
                         </div>
+                        <WorkOrderServiceComponentsEditor
+                          components={os.components || []}
+                          componentsCatalog={componentsCatalog}
+                          needsOrderHousings={needsOrderHousings}
+                          generalComponentId={generalComponentId}
+                          createDefaultComponent={createDefaultComponent}
+                          onUpdateComponent={(ci, field, value) => updateServiceComponent(idx, ci, field, value)}
+                          onAddComponent={() => addComponentToService(idx)}
+                          onRemoveComponent={(ci) => removeComponentFromService(idx, ci)}
+                          onOpenHousingsModal={(ci) => openHousingsModalForComponent(idx, ci)}
+                        />
                         <div style={{ marginTop: 10 }}>
                           <span style={{ fontSize: 12, fontWeight: 600, color: '#5c5966' }}>Técnicos y turno</span>
                           {(os.technicians || [{ technicianId: '', shift: SHIFT_DAY }]).map((t, ti) => (
@@ -1039,17 +1050,6 @@ export default function WorkOrderDetail() {
                             + Agregar técnico
                           </button>
                         </div>
-                        <WorkOrderServiceComponentsEditor
-                          components={os.components || []}
-                          componentsCatalog={componentsCatalog}
-                          needsOrderHousings={needsOrderHousings}
-                          generalComponentId={generalComponentId}
-                          createDefaultComponent={createDefaultComponent}
-                          onUpdateComponent={(ci, field, value) => updateServiceComponent(idx, ci, field, value)}
-                          onAddComponent={() => addComponentToService(idx)}
-                          onRemoveComponent={(ci) => removeComponentFromService(idx, ci)}
-                          onOpenHousingsModal={(ci) => openHousingsModalForComponent(idx, ci)}
-                        />
                       </div>
                     ))}
                     <button

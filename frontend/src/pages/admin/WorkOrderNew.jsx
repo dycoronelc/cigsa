@@ -542,6 +542,17 @@ export default function WorkOrderNew() {
                   </button>
                 </div>
                 </div>
+                <WorkOrderServiceComponentsEditor
+                  components={os.components || []}
+                  componentsCatalog={componentsCatalog}
+                  needsOrderHousings={needsOrderHousings}
+                  generalComponentId={generalComponentId}
+                  createDefaultComponent={createDefaultComponent}
+                  onUpdateComponent={(ci, field, value) => updateServiceComponent(idx, ci, field, value)}
+                  onAddComponent={() => addComponentToService(idx)}
+                  onRemoveComponent={(ci) => removeComponentFromService(idx, ci)}
+                  onOpenHousingsModal={(ci) => openHousingsModalForComponent(idx, ci)}
+                />
                 <div style={{ width: '100%', marginTop: 8, paddingTop: 8, borderTop: '1px solid #e8e6ef' }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: '#5c5966' }}>Técnicos y turno</span>
                   {(os.technicians || [{ technicianId: '', shift: SHIFT_DAY }]).map((t, ti) => (
@@ -571,17 +582,6 @@ export default function WorkOrderNew() {
                     + Agregar técnico
                   </button>
                 </div>
-                                <WorkOrderServiceComponentsEditor
-                  components={os.components || []}
-                  componentsCatalog={componentsCatalog}
-                  needsOrderHousings={needsOrderHousings}
-                  generalComponentId={generalComponentId}
-                  createDefaultComponent={createDefaultComponent}
-                  onUpdateComponent={(ci, field, value) => updateServiceComponent(idx, ci, field, value)}
-                  onAddComponent={() => addComponentToService(idx)}
-                  onRemoveComponent={(ci) => removeComponentFromService(idx, ci)}
-                  onOpenHousingsModal={(ci) => openHousingsModalForComponent(idx, ci)}
-                />
               </div>
             ))}
             <button type="button" className="btn-secondary" onClick={addService} style={{ marginTop: 4 }}>
