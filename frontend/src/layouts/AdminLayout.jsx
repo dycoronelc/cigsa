@@ -19,6 +19,7 @@ export default function AdminLayout({ children }) {
     { path: '/admin/service-categories', label: 'Categorías', icon: '🏷️' },
     { path: '/admin/service-types', label: 'Tipos de Servicio', icon: '📑' },
     { path: '/admin/locations', label: 'Ubicaciones', icon: '📍' },
+    { path: '/admin/components', label: 'Componentes', icon: '🧩' },
     { path: '/admin/technicians', label: 'Técnicos', icon: '🔧' },
     { path: '/admin/users', label: 'Usuarios', icon: '👤' },
     { path: '/admin/activity-log', label: 'Bitácora', icon: '📝' }

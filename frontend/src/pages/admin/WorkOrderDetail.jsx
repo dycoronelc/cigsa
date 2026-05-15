@@ -9,6 +9,14 @@ import AlertDialog from '../../components/AlertDialog';
 import SearchableSelect from '../../components/SearchableSelect';
 import { isMachiningRepairByTypeName, isMachiningRepairServiceType } from '../../utils/serviceTypeHousings';
 import { SHIFT_DAY, SHIFT_NIGHT, shiftLabel } from '../../utils/serviceTechnicianShift';
+import {
+  createDefaultComponent,
+  findGeneralComponentId,
+  mapComponentsFromApi,
+  mapComponentsToPayload,
+  mapHousingFromApi,
+  totalHousingCount
+} from '../../utils/workOrderComponents';
 import './WorkOrderDetail.css';
 
 export default function WorkOrderDetail() {
@@ -39,8 +47,11 @@ export default function WorkOrderDetail() {
   const [serviceTypes, setServiceTypes] = useState([]);
   const [technicians, setTechnicians] = useState([]);
   const [equipmentOptions, setEquipmentOptions] = useState([]);
+  const [componentsCatalog, setComponentsCatalog] = useState([]);
+  const [generalComponentId, setGeneralComponentId] = useState(null);
   const [showHousingsModal, setShowHousingsModal] = useState(false);
   const [editingServiceIdx, setEditingServiceIdx] = useState(null);
+  const [editingComponentIdx, setEditingComponentIdx] = useState(null);
   const [activityLog, setActivityLog] = useState([]);
   const [loadingActivity, setLoadingActivity] = useState(false);
   const [showEditMeasurementModal, setShowEditMeasurementModal] = useState(false);
@@ -86,16 +97,20 @@ export default function WorkOrderDetail() {
     // lookups for editable selects
     const fetchLookups = async () => {
       try {
-        const [servicesRes, techRes, locationsRes, typesRes] = await Promise.all([
+        const [servicesRes, techRes, locationsRes, typesRes, componentsRes] = await Promise.all([
           api.get('/services'),
           api.get('/technicians'),
           api.get('/locations'),
-          api.get('/service-types')
+          api.get('/service-types'),
+          api.get('/components')
         ]);
         setServices(servicesRes.data || []);
         setTechnicians(techRes.data || []);
         setLocations(locationsRes.data || []);
         setServiceTypes(typesRes.data || []);
+        const compList = componentsRes.data || [];
+        setComponentsCatalog(compList);
+        setGeneralComponentId(findGeneralComponentId(compList));
       } catch (error) {
         // non-blocking
         console.error('Error fetching lookups:', error);
@@ -183,24 +198,38 @@ export default function WorkOrderDetail() {
       startDate: toDateTimeLocalValue(order.start_date),
       completionDate: toDateTimeLocalValue(order.completion_date),
       services: orderServicesList.length > 0
-        ? orderServicesList.map(s => ({
-            serviceId: String(s.service_id),
-            housingCount: (s.housings || []).length || s.housing_count || 0,
-            housings: (s.housings || []).map(h => ({
-              measureCode: h.measure_code,
-              description: h.description,
-              nominalValue: h.nominal_value,
-              nominalUnit: h.nominal_unit,
-              tolerance: h.tolerance
-            })),
-            technicians: (s.technicians || []).length > 0
-              ? s.technicians.map((t) => ({
-                  technicianId: String(t.technician_id),
-                  shift: t.shift === SHIFT_NIGHT || t.shift === 'night' ? SHIFT_NIGHT : SHIFT_DAY
-                }))
-              : [{ technicianId: '', shift: SHIFT_DAY }]
-          }))
-        : [{ serviceId: '', housingCount: 0, housings: [], technicians: [{ technicianId: '', shift: SHIFT_DAY }] }],
+        ? orderServicesList.map((s) => {
+            const gid = generalComponentId || findGeneralComponentId(componentsCatalog);
+            const components =
+              Array.isArray(s.components) && s.components.length > 0
+                ? mapComponentsFromApi(s.components, gid)
+                : [
+                    {
+                      ...createDefaultComponent(gid),
+                      housingCount: (s.housings || []).length || s.housing_count || 0,
+                      housings: (s.housings || []).map(mapHousingFromApi)
+                    }
+                  ];
+            return {
+              serviceId: String(s.service_id),
+              housingCount: totalHousingCount(components),
+              components,
+              technicians: (s.technicians || []).length > 0
+                ? s.technicians.map((t) => ({
+                    technicianId: String(t.technician_id),
+                    shift: t.shift === SHIFT_NIGHT || t.shift === 'night' ? SHIFT_NIGHT : SHIFT_DAY
+                  }))
+                : [{ technicianId: '', shift: SHIFT_DAY }]
+            };
+          })
+        : [
+            {
+              serviceId: '',
+              housingCount: 0,
+              components: [createDefaultComponent(generalComponentId)],
+              technicians: [{ technicianId: '', shift: SHIFT_DAY }]
+            }
+          ],
       description: order.description || ''
     });
     setEditMode(true);
@@ -312,15 +341,15 @@ export default function WorkOrderDetail() {
     return s;
   };
 
-  const openHousingsModalForService = (idx) => {
+  const openHousingsModalForComponent = (serviceIdx, componentIdx) => {
     if (!needsOrderHousings) return;
-    const os = (editData.services || [])[idx];
-    const count = Number(os?.housingCount) || 0;
+    const comp = (editData.services || [])[serviceIdx]?.components?.[componentIdx];
+    const count = Number(comp?.housingCount) || 0;
     if (count <= 0) {
-      showError('Indique la cantidad de alojamientos antes de configurarlos.');
+      showError('Indique la cantidad de alojamientos del componente antes de configurarlos.');
       return;
     }
-    const existing = os?.housings || [];
+    const existing = comp?.housings || [];
     const next = Array.from({ length: count }).map((_, i) => {
       if (existing[i]) return { ...existing[i], measureCode: existing[i].measureCode || numberToLetters(i + 1) };
       return {
@@ -332,16 +361,19 @@ export default function WorkOrderDetail() {
       };
     });
     const nextServices = [...(editData.services || [])];
-    nextServices[idx] = { ...nextServices[idx], housings: next };
+    const comps = [...(nextServices[serviceIdx].components || [])];
+    comps[componentIdx] = { ...comps[componentIdx], housings: next };
+    nextServices[serviceIdx] = { ...nextServices[serviceIdx], components: comps };
     setEditData({ ...editData, services: nextServices });
-    setEditingServiceIdx(idx);
+    setEditingServiceIdx(serviceIdx);
+    setEditingComponentIdx(componentIdx);
     setShowHousingsModal(true);
   };
 
   const closeHousingsModal = (save = false) => {
-    if (save && editingServiceIdx !== null) {
-      const os = (editData.services || [])[editingServiceIdx];
-      const housings = os?.housings || [];
+    if (save && editingServiceIdx !== null && editingComponentIdx !== null) {
+      const housings =
+        (editData.services || [])[editingServiceIdx]?.components?.[editingComponentIdx]?.housings || [];
       const hasMissing = housings.some(
         (h) => !h.measureCode || !h.description || (h.nominalValue !== '' && h.nominalValue !== undefined && !h.nominalUnit)
       );
@@ -352,37 +384,42 @@ export default function WorkOrderDetail() {
     }
     setShowHousingsModal(false);
     setEditingServiceIdx(null);
+    setEditingComponentIdx(null);
   };
 
   const updateEditHousing = (idx, field, value) => {
+    if (editingServiceIdx === null || editingComponentIdx === null) return;
     const next = [...(editData.services || [])];
-    const h = next[editingServiceIdx]?.housings || [];
-    const hi = h[idx];
-    if (hi) {
-      h[idx] = { ...hi, [field]: value };
-      next[editingServiceIdx] = { ...next[editingServiceIdx], housings: h };
+    const comps = [...(next[editingServiceIdx].components || [])];
+    const h = [...(comps[editingComponentIdx].housings || [])];
+    if (h[idx]) {
+      h[idx] = { ...h[idx], [field]: value };
+      comps[editingComponentIdx] = { ...comps[editingComponentIdx], housings: h };
+      next[editingServiceIdx] = { ...next[editingServiceIdx], components: comps };
       setEditData({ ...editData, services: next });
     }
   };
 
   const removeEditHousingRow = (housingIdx) => {
-    if (editingServiceIdx === null) return;
+    if (editingServiceIdx === null || editingComponentIdx === null) return;
     showConfirm(
       '¿Eliminar este alojamiento? Debe guardar la OT para aplicar el cambio. Si ya hay mediciones en ese alojamiento, el servidor no lo permitirá hasta quitarlas.',
       () => {
         const next = [...(editData.services || [])];
-        const svc = next[editingServiceIdx];
-        const hList = [...(svc.housings || [])];
+        const comps = [...(next[editingServiceIdx].components || [])];
+        const hList = [...(comps[editingComponentIdx].housings || [])];
         hList.splice(housingIdx, 1);
-        next[editingServiceIdx] = {
-          ...svc,
+        comps[editingComponentIdx] = {
+          ...comps[editingComponentIdx],
           housings: hList,
-          housingCount: hList.length,
+          housingCount: hList.length
         };
+        next[editingServiceIdx] = { ...next[editingServiceIdx], components: comps };
         setEditData({ ...editData, services: next });
         if (hList.length === 0) {
           setShowHousingsModal(false);
           setEditingServiceIdx(null);
+          setEditingComponentIdx(null);
         }
       },
       'Eliminar alojamiento',
@@ -435,27 +472,17 @@ export default function WorkOrderDetail() {
         technicianId: parseInt(t.technicianId, 10),
         shift: t.shift === SHIFT_NIGHT ? SHIFT_NIGHT : SHIFT_DAY
       }));
-      if (!needsOrderHousings) {
-        return {
-          serviceId: parseInt(s.serviceId, 10),
-          housingCount: 0,
-          housings: [],
-          technicians
-        };
-      }
-      let rows = (s.housings || []).map(mapHousingRow);
-      const count = parseInt(s.housingCount, 10) || 0;
-      if (rows.length === 0 && count > 0) {
-        const fromOrder = (order.services || []).find((os) => String(os.service_id) === String(s.serviceId));
-        if (fromOrder && (fromOrder.housings || []).length > 0) {
-          rows = (fromOrder.housings || []).map(mapHousingRow);
-        }
-      }
+      const components = mapComponentsToPayload(
+        s.components?.length
+          ? s.components
+          : [{ componentId: generalComponentId, housingCount: s.housingCount, housings: s.housings }],
+        needsOrderHousings
+      );
       return {
         serviceId: parseInt(s.serviceId, 10),
-        housingCount: count,
+        housingCount: totalHousingCount(s.components || []),
         technicians,
-        housings: rows
+        components
       };
     });
     // Incluir siempre servicios si hay filas: evita 400 "No fields to update" cuando el stringify
@@ -920,50 +947,7 @@ export default function WorkOrderDetail() {
                               placeholder="Seleccionar servicio..."
                             />
                           </div>
-                          {needsOrderHousings && (
-                          <div style={{ flex: '1 1 100px', minWidth: 100 }}>
-                            <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Alojamientos</label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={os.housingCount || ''}
-                              onChange={(e) => {
-                                const count = Number(e.target.value) || 0;
-                                const next = [...(editData.services || [])];
-                                const existing = next[idx].housings || [];
-                                const newHousings = Array.from({ length: count }).map((_, i) => {
-                                  if (existing[i]) return existing[i];
-                                  return {
-                                    measureCode: numberToLetters(i + 1),
-                                    description: '',
-                                    nominalValue: '',
-                                    nominalUnit: '',
-                                    tolerance: ''
-                                  };
-                                });
-                                next[idx] = { ...next[idx], housingCount: e.target.value, housings: newHousings };
-                                setEditData({ ...editData, services: next });
-                                if (count > 0) {
-                                  setEditingServiceIdx(idx);
-                                  setShowHousingsModal(true);
-                                }
-                              }}
-                              placeholder="0"
-                            />
-                          </div>
-                          )}
                           <div style={{ display: 'flex', gap: 8 }}>
-                            {needsOrderHousings && (
-                            <button
-                              type="button"
-                              className="btn-secondary"
-                              onClick={() => openHousingsModalForService(idx)}
-                              title="Ver / Editar alojamientos"
-                              style={{ padding: '8px 12px' }}
-                            >
-                              📋
-                            </button>
-                            )}
                             <button
                               type="button"
                               className="btn-secondary"
@@ -1004,6 +988,67 @@ export default function WorkOrderDetail() {
                             + Agregar técnico
                           </button>
                         </div>
+                        <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e8e6ef' }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#5c5966' }}>Componentes</span>
+                          {(os.components || [createDefaultComponent(generalComponentId)]).map((comp, ci) => (
+                            <div key={ci} style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                              <div style={{ flex: '2 1 180px', minWidth: 140 }}>
+                                <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Componente</label>
+                                <select
+                                  value={comp.componentId}
+                                  onChange={(e) => {
+                                    const next = [...(editData.services || [])];
+                                    const comps = [...(next[idx].components || [])];
+                                    comps[ci] = { ...comps[ci], componentId: e.target.value };
+                                    next[idx] = { ...next[idx], components: comps };
+                                    setEditData({ ...editData, services: next });
+                                  }}
+                                >
+                                  <option value="">Seleccionar...</option>
+                                  {componentsCatalog.map((c) => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              {needsOrderHousings && (
+                                <>
+                                  <div style={{ flex: '0 1 90px', minWidth: 80 }}>
+                                    <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Alojamientos</label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={comp.housingCount || ''}
+                                      onChange={(e) => {
+                                        const count = Number(e.target.value) || 0;
+                                        const next = [...(editData.services || [])];
+                                        const comps = [...(next[idx].components || [])];
+                                        const existing = comps[ci].housings || [];
+                                        comps[ci] = {
+                                          ...comps[ci],
+                                          housingCount: e.target.value,
+                                          housings: count > 0
+                                            ? Array.from({ length: count }).map((_, i) => existing[i] || {
+                                                measureCode: numberToLetters(i + 1),
+                                                description: '',
+                                                nominalValue: '',
+                                                nominalUnit: '',
+                                                tolerance: ''
+                                              })
+                                            : []
+                                        };
+                                        next[idx] = { ...next[idx], components: comps };
+                                        setEditData({ ...editData, services: next });
+                                        if (count > 0) openHousingsModalForComponent(idx, ci);
+                                      }}
+                                      placeholder="0"
+                                    />
+                                  </div>
+                                  <button type="button" className="btn-secondary" style={{ padding: '8px 12px' }} onClick={() => openHousingsModalForComponent(idx, ci)} title="Configurar alojamientos">📋</button>
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                     <button
@@ -1011,7 +1056,7 @@ export default function WorkOrderDetail() {
                       className="btn-secondary"
                       onClick={() => setEditData({
                         ...editData,
-                        services: [...(editData.services || []), { serviceId: '', housingCount: 0, housings: [], technicians: [{ technicianId: '', shift: SHIFT_DAY }] }]
+                        services: [...(editData.services || []), { serviceId: '', housingCount: 0, components: [createDefaultComponent(generalComponentId)], technicians: [{ technicianId: '', shift: SHIFT_DAY }] }]
                       })}
                       style={{ marginTop: 4 }}
                     >
@@ -1028,6 +1073,18 @@ export default function WorkOrderDetail() {
                             {isMachiningRepairByTypeName(order.service_type_name)
                               ? ` — ${((s.housings || []).length || s.housing_count || 0)} alojamiento(s)`
                               : ''}
+                            {(s.components || []).length > 0 && (
+                              <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontWeight: 'normal', fontSize: 13 }}>
+                                {(s.components || []).map((c, ci) => (
+                                  <li key={ci}>
+                                    {c.component_name || 'Componente'}
+                                    {isMachiningRepairByTypeName(order.service_type_name)
+                                      ? ` (${(c.housings || []).length || c.housing_count || 0} aloj.)`
+                                      : ''}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
                             {(s.technicians || []).length > 0 && (
                               <div style={{ marginTop: 4, fontSize: 13, color: '#4a4752' }}>
                                 {(s.technicians || []).map((t, j) => (
@@ -1675,7 +1732,7 @@ export default function WorkOrderDetail() {
         )}
       </div>
 
-      {needsOrderHousings && showHousingsModal && editingServiceIdx !== null && editMode && (
+      {needsOrderHousings && showHousingsModal && editingServiceIdx !== null && editingComponentIdx !== null && editMode && (
         <div className="modal-overlay" onClick={() => closeHousingsModal(false)}>
           <div
             className="modal-content"
@@ -1684,7 +1741,7 @@ export default function WorkOrderDetail() {
           >
             <h2>Alojamientos — {(services.find(s => s.id === parseInt((editData.services || [])[editingServiceIdx]?.serviceId))?.name || 'Servicio')}</h2>
             <p style={{ marginTop: -8, color: '#6e6b7b' }}>
-              Complete la información de cada alojamiento. Cada servicio comienza con A, B, C...
+              Complete la información de cada alojamiento. Cada componente comienza con A, B, C...
             </p>
             <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
               <table className="data-table" style={{ width: '100%', tableLayout: 'fixed' }}>
@@ -1699,14 +1756,14 @@ export default function WorkOrderDetail() {
                   </tr>
                 </thead>
                 <tbody>
-                  {((editData.services || [])[editingServiceIdx]?.housings || []).length === 0 ? (
+                  {((editData.services || [])[editingServiceIdx]?.components?.[editingComponentIdx]?.housings || []).length === 0 ? (
                     <tr>
                       <td colSpan={6} style={{ padding: '1rem', color: 'var(--text-light)', textAlign: 'center' }}>
                         No hay alojamientos. Ajuste la cantidad en la lista de servicios o cierre este cuadro.
                       </td>
                     </tr>
                   ) : null}
-                  {((editData.services || [])[editingServiceIdx]?.housings || []).map((h, idx) => (
+                  {((editData.services || [])[editingServiceIdx]?.components?.[editingComponentIdx]?.housings || []).map((h, idx) => (
                     <tr key={(h.measureCode || 'm') + '-' + idx}>
                       <td style={{ whiteSpace: 'nowrap', fontWeight: 700, verticalAlign: 'middle' }}>{h.measureCode}</td>
                       <td>
@@ -1913,4 +1970,5 @@ export default function WorkOrderDetail() {
     </div>
   );
 }
+
 

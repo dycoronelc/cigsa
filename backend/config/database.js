@@ -800,6 +800,168 @@ export const initDatabase = async () => {
       }
     }
 
+    // Components master + work_order_service_components (nivel entre servicio y alojamiento)
+    const dbNameComponents = process.env.DB_NAME || 'cigsa_db';
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS components (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          name VARCHAR(100) UNIQUE NOT NULL,
+          description TEXT,
+          is_system BOOLEAN DEFAULT FALSE,
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+      `);
+      const [generalComp] = await pool.query(
+        'SELECT id FROM components WHERE name = ? LIMIT 1',
+        ['Componente General']
+      );
+      if (generalComp.length === 0) {
+        await pool.query(
+          'INSERT INTO components (name, description, is_system, is_active) VALUES (?, ?, TRUE, TRUE)',
+          ['Componente General', 'Componente por defecto para servicios existentes y generales']
+        );
+        console.log('Seeded Componente General in components master');
+      }
+    } catch (error) {
+      console.error('Error ensuring components table:', error.sqlMessage || error.message);
+    }
+
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS work_order_service_components (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          work_order_service_id INT NOT NULL,
+          component_id INT NOT NULL,
+          housing_count INT DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (work_order_service_id) REFERENCES work_order_services(id) ON DELETE CASCADE,
+          FOREIGN KEY (component_id) REFERENCES components(id) ON DELETE RESTRICT,
+          UNIQUE KEY unique_wos_component (work_order_service_id, component_id)
+        )
+      `);
+    } catch (error) {
+      console.error('Error ensuring work_order_service_components:', error.sqlMessage || error.message);
+    }
+
+    try {
+      const [woscCol] = await pool.query(
+        `
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_order_housings' AND COLUMN_NAME = 'work_order_service_component_id'
+        `,
+        [dbNameComponents]
+      );
+      if (woscCol.length === 0) {
+        await pool.query(
+          'ALTER TABLE work_order_housings ADD COLUMN work_order_service_component_id INT NULL AFTER work_order_service_id'
+        );
+        try {
+          await pool.query(
+            'ALTER TABLE work_order_housings ADD CONSTRAINT woh_fk_wosc FOREIGN KEY (work_order_service_component_id) REFERENCES work_order_service_components(id) ON DELETE CASCADE'
+          );
+        } catch (fkErr) {
+          if (!fkErr.sqlMessage?.includes('Duplicate')) console.warn('FK woh_fk_wosc:', fkErr.message);
+        }
+      }
+
+      const [generalRow] = await pool.query(
+        "SELECT id FROM components WHERE name = 'Componente General' LIMIT 1"
+      );
+      const generalComponentId = generalRow[0]?.id;
+      if (!generalComponentId) {
+        console.warn('Migration components: Componente General not found');
+      } else {
+        const [wosWithoutComp] = await pool.query(`
+          SELECT wos.id AS wos_id, wos.work_order_id, wos.housing_count
+          FROM work_order_services wos
+          WHERE NOT EXISTS (
+            SELECT 1 FROM work_order_service_components wosc WHERE wosc.work_order_service_id = wos.id
+          )
+        `);
+        for (const row of wosWithoutComp) {
+          const [ins] = await pool.query(
+            'INSERT INTO work_order_service_components (work_order_service_id, component_id, housing_count) VALUES (?, ?, ?)',
+            [row.wos_id, generalComponentId, row.housing_count || 0]
+          );
+          const woscId = ins.insertId;
+          await pool.query(
+            'UPDATE work_order_housings SET work_order_service_component_id = ? WHERE work_order_service_id = ? AND work_order_service_component_id IS NULL',
+            [woscId, row.wos_id]
+          );
+        }
+        if (wosWithoutComp.length > 0) {
+          console.log(`Migrated ${wosWithoutComp.length} work order services to Componente General`);
+        }
+
+        const [orphanHousings] = await pool.query(`
+          SELECT wh.id, wh.work_order_id, wh.work_order_service_id
+          FROM work_order_housings wh
+          WHERE wh.work_order_service_component_id IS NULL AND wh.work_order_service_id IS NOT NULL
+        `);
+        for (const h of orphanHousings) {
+          let [woscRows] = await pool.query(
+            'SELECT id FROM work_order_service_components WHERE work_order_service_id = ? AND component_id = ? LIMIT 1',
+            [h.work_order_service_id, generalComponentId]
+          );
+          if (woscRows.length === 0) {
+            const [cnt] = await pool.query(
+              'SELECT COUNT(*) AS c FROM work_order_housings WHERE work_order_service_id = ?',
+              [h.work_order_service_id]
+            );
+            const [ins] = await pool.query(
+              'INSERT INTO work_order_service_components (work_order_service_id, component_id, housing_count) VALUES (?, ?, ?)',
+              [h.work_order_service_id, generalComponentId, cnt[0]?.c || 0]
+            );
+            woscRows = [{ id: ins.insertId }];
+          }
+          await pool.query('UPDATE work_order_housings SET work_order_service_component_id = ? WHERE id = ?', [
+            woscRows[0].id,
+            h.id
+          ]);
+        }
+        if (orphanHousings.length > 0) {
+          console.log(`Linked ${orphanHousings.length} orphan housings to Componente General`);
+        }
+      }
+
+      const [oldIdx] = await pool.query(
+        `
+        SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_order_housings' AND INDEX_NAME = 'unique_work_order_service_measure'
+        `,
+        [dbNameComponents]
+      );
+      const [newIdx] = await pool.query(
+        `
+        SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'work_order_housings' AND INDEX_NAME = 'unique_wosc_measure'
+        `,
+        [dbNameComponents]
+      );
+      if (oldIdx.length > 0 && newIdx.length === 0) {
+        try {
+          await pool.query('ALTER TABLE work_order_housings DROP INDEX unique_work_order_service_measure');
+        } catch (e) {
+          /* puede no existir */
+        }
+        try {
+          await pool.query(
+            'ALTER TABLE work_order_housings ADD UNIQUE KEY unique_wosc_measure (work_order_service_component_id, measure_code)'
+          );
+          console.log('Added unique_wosc_measure to work_order_housings');
+        } catch (e) {
+          if (!e.sqlMessage?.includes('Duplicate')) console.warn('unique_wosc_measure:', e.message);
+        }
+      }
+    } catch (error) {
+      if (!error.sqlMessage?.includes('Duplicate') && !error.sqlMessage?.includes('already exists')) {
+        console.error('Error migrating work_order_housings to components:', error.message);
+      }
+    }
+
     // Create uploads directory if it doesn't exist
     const uploadsDir = path.join(__dirname, '..', process.env.UPLOAD_DIR || 'uploads');
     if (!fs.existsSync(uploadsDir)) {

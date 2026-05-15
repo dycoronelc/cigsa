@@ -6,6 +6,13 @@ import AlertDialog from '../../components/AlertDialog';
 import SearchableSelect from '../../components/SearchableSelect';
 import { isMachiningRepairServiceType } from '../../utils/serviceTypeHousings';
 import { SHIFT_DAY, SHIFT_NIGHT, shiftLabel } from '../../utils/serviceTechnicianShift';
+import {
+  createDefaultComponent,
+  findGeneralComponentId,
+  mapComponentsToPayload,
+  totalHousingCount,
+  GENERAL_COMPONENT_NAME
+} from '../../utils/workOrderComponents';
 import './WorkOrderNew.css';
 
 export default function WorkOrderNew() {
@@ -18,11 +25,17 @@ export default function WorkOrderNew() {
   const [locations, setLocations] = useState([]);
   const [serviceTypes, setServiceTypes] = useState([]);
   const [technicians, setTechnicians] = useState([]);
+  const [componentsCatalog, setComponentsCatalog] = useState([]);
+  const [generalComponentId, setGeneralComponentId] = useState(null);
   const [showHousingsModal, setShowHousingsModal] = useState(false);
   const [editingServiceIdx, setEditingServiceIdx] = useState(null);
-  const [orderServices, setOrderServices] = useState([
-    { serviceId: '', housingCount: 0, housings: [], technicians: [{ technicianId: '', shift: SHIFT_DAY }] }
-  ]);
+  const [editingComponentIdx, setEditingComponentIdx] = useState(null);
+  const emptyService = () => ({
+    serviceId: '',
+    technicians: [{ technicianId: '', shift: SHIFT_DAY }],
+    components: [createDefaultComponent(generalComponentId)]
+  });
+  const [orderServices, setOrderServices] = useState([emptyService()]);
   const [formData, setFormData] = useState({
     clientId: '',
     equipmentId: '',
@@ -51,16 +64,16 @@ export default function WorkOrderNew() {
     return s;
   };
 
-  const openHousingsModalForService = (idx) => {
+  const openHousingsModalForComponent = (serviceIdx, componentIdx) => {
     if (!needsOrderHousings) return;
-    const os = orderServices[idx];
-    const count = Number(os.housingCount) || 0;
+    const comp = orderServices[serviceIdx]?.components?.[componentIdx];
+    const count = Number(comp?.housingCount) || 0;
     if (!Number.isFinite(count) || count <= 0) {
-      showWarning('Indique la cantidad de alojamientos antes de configurarlos.');
+      showWarning('Indique la cantidad de alojamientos del componente antes de configurarlos.');
       return;
     }
-    const existing = os.housings || [];
-    const next = Array.from({ length: count }).map((_, i) => {
+    const existing = comp?.housings || [];
+    const nextHousings = Array.from({ length: count }).map((_, i) => {
       if (existing[i]) return existing[i];
       return {
         measureCode: numberToLetters(i + 1),
@@ -71,16 +84,18 @@ export default function WorkOrderNew() {
       };
     });
     const nextServices = [...orderServices];
-    nextServices[idx] = { ...nextServices[idx], housings: next };
+    const comps = [...(nextServices[serviceIdx].components || [])];
+    comps[componentIdx] = { ...comps[componentIdx], housings: nextHousings };
+    nextServices[serviceIdx] = { ...nextServices[serviceIdx], components: comps };
     setOrderServices(nextServices);
-    setEditingServiceIdx(idx);
+    setEditingServiceIdx(serviceIdx);
+    setEditingComponentIdx(componentIdx);
     setShowHousingsModal(true);
   };
 
   const closeHousingsModal = (save = false) => {
-    if (save && editingServiceIdx !== null) {
-      const os = orderServices[editingServiceIdx];
-      const housings = os.housings || [];
+    if (save && editingServiceIdx !== null && editingComponentIdx !== null) {
+      const housings = orderServices[editingServiceIdx]?.components?.[editingComponentIdx]?.housings || [];
       const hasMissing = housings.some(
         (h) => !h.measureCode || !h.description || (h.nominalValue !== '' && !h.nominalUnit)
       );
@@ -91,24 +106,73 @@ export default function WorkOrderNew() {
     }
     setShowHousingsModal(false);
     setEditingServiceIdx(null);
+    setEditingComponentIdx(null);
   };
 
   const updateHousing = (idx, field, value) => {
+    if (editingServiceIdx === null || editingComponentIdx === null) return;
     const next = [...orderServices];
-    const h = next[editingServiceIdx].housings || [];
-    const hi = h[idx];
-    if (hi) {
-      h[idx] = { ...hi, [field]: value };
-      next[editingServiceIdx] = { ...next[editingServiceIdx], housings: h };
+    const comps = [...(next[editingServiceIdx].components || [])];
+    const h = [...(comps[editingComponentIdx].housings || [])];
+    if (h[idx]) {
+      h[idx] = { ...h[idx], [field]: value };
+      comps[editingComponentIdx] = { ...comps[editingComponentIdx], housings: h };
+      next[editingServiceIdx] = { ...next[editingServiceIdx], components: comps };
       setOrderServices(next);
     }
   };
 
+  const addComponentToService = (serviceIdx) => {
+    const next = [...orderServices];
+    const comps = [...(next[serviceIdx].components || []), createDefaultComponent(generalComponentId)];
+    next[serviceIdx] = { ...next[serviceIdx], components: comps };
+    setOrderServices(next);
+  };
+
+  const removeComponentFromService = (serviceIdx, componentIdx) => {
+    const next = [...orderServices];
+    const comps = (next[serviceIdx].components || []).filter((_, i) => i !== componentIdx);
+    next[serviceIdx] = {
+      ...next[serviceIdx],
+      components: comps.length ? comps : [createDefaultComponent(generalComponentId)]
+    };
+    setOrderServices(next);
+  };
+
+  const updateServiceComponent = (serviceIdx, componentIdx, field, value) => {
+    const next = [...orderServices];
+    const comps = [...(next[serviceIdx].components || [])];
+    if (!comps[componentIdx]) return;
+    comps[componentIdx] = { ...comps[componentIdx], [field]: value };
+    if (field === 'housingCount' && needsOrderHousings) {
+      const count = Number(value) || 0;
+      const existing = comps[componentIdx].housings || [];
+      if (count > 0) {
+        comps[componentIdx].housings = Array.from({ length: count }).map((_, i) => {
+          if (existing[i]) return existing[i];
+          return {
+            measureCode: numberToLetters(i + 1),
+            description: '',
+            nominalValue: '',
+            nominalUnit: '',
+            tolerance: ''
+          };
+        });
+        next[serviceIdx] = { ...next[serviceIdx], components: comps };
+        setOrderServices(next);
+        setEditingServiceIdx(serviceIdx);
+        setEditingComponentIdx(componentIdx);
+        setShowHousingsModal(true);
+        return;
+      }
+      comps[componentIdx].housings = [];
+    }
+    next[serviceIdx] = { ...next[serviceIdx], components: comps };
+    setOrderServices(next);
+  };
+
   const addService = () => {
-    setOrderServices([
-      ...orderServices,
-      { serviceId: '', housingCount: 0, housings: [], technicians: [{ technicianId: '', shift: SHIFT_DAY }] }
-    ]);
+    setOrderServices([...orderServices, emptyService()]);
   };
 
   const addTechnicianRow = (serviceIdx) => {
@@ -142,28 +206,6 @@ export default function WorkOrderNew() {
   const updateService = (idx, field, value) => {
     const next = [...orderServices];
     next[idx] = { ...next[idx], [field]: value };
-    if (field === 'housingCount' && needsOrderHousings) {
-      const count = Number(value) || 0;
-      if (count > 0) {
-        const existing = next[idx].housings || [];
-        const newHousings = Array.from({ length: count }).map((_, i) => {
-          if (existing[i]) return existing[i];
-          return {
-            measureCode: numberToLetters(i + 1),
-            description: '',
-            nominalValue: '',
-            nominalUnit: '',
-            tolerance: ''
-          };
-        });
-        next[idx] = { ...next[idx], housings: newHousings };
-        setOrderServices(next);
-        setEditingServiceIdx(idx);
-        setShowHousingsModal(true);
-      } else {
-        next[idx] = { ...next[idx], housings: [] };
-      }
-    }
     setOrderServices(next);
   };
 
@@ -181,18 +223,31 @@ export default function WorkOrderNew() {
 
   const fetchData = async () => {
     try {
-      const [clientsRes, servicesRes, techniciansRes, locationsRes, typesRes] = await Promise.all([
+      const [clientsRes, servicesRes, techniciansRes, locationsRes, typesRes, componentsRes] = await Promise.all([
         api.get('/clients'),
         api.get('/services'),
         api.get('/technicians'),
         api.get('/locations'),
-        api.get('/service-types')
+        api.get('/service-types'),
+        api.get('/components')
       ]);
       setClients(clientsRes.data);
       setServices(servicesRes.data);
       setTechnicians(techniciansRes.data);
       setLocations(locationsRes.data);
       setServiceTypes(typesRes.data);
+      const compList = componentsRes.data || [];
+      setComponentsCatalog(compList);
+      const gId = findGeneralComponentId(compList);
+      setGeneralComponentId(gId);
+      setOrderServices((prev) =>
+        prev.map((os) => ({
+          ...os,
+          components: (os.components || []).map((c) =>
+            c.componentId ? c : createDefaultComponent(gId)
+          )
+        }))
+      );
     } catch (error) {
       console.error('Error fetching data:', error);
     }
@@ -234,38 +289,40 @@ export default function WorkOrderNew() {
             technicianId: parseInt(t.technicianId, 10),
             shift: t.shift === SHIFT_NIGHT ? SHIFT_NIGHT : SHIFT_DAY
           }));
-          if (!needsOrderHousings) {
-            return {
-              serviceId: parseInt(s.serviceId),
-              housingCount: 0,
-              housings: [],
-              technicians
-            };
-          }
-          const housingCount = parseInt(s.housingCount) || 0;
-          const housings = (s.housings || []).slice(0, housingCount);
-          const hasMissing = housings.some(
-            (h) => !h.measureCode || !h.description || (h.nominalValue !== '' && !h.nominalUnit)
-          );
-          if (housingCount > 0 && hasMissing) {
-            throw new Error('Complete los alojamientos de cada servicio.');
+          const components = mapComponentsToPayload(s.components, needsOrderHousings);
+          if (needsOrderHousings) {
+            for (const comp of components) {
+              if (!comp.componentId) {
+                throw new Error('Seleccione el componente en cada línea de servicio.');
+              }
+              const housings = comp.housings || [];
+              const hasMissing = housings.some(
+                (h) => !h.measureCode || !h.description || (h.nominalValue != null && h.nominalValue !== '' && !h.nominalUnit)
+              );
+              if (comp.housingCount > 0 && hasMissing) {
+                throw new Error('Complete los alojamientos de cada componente.');
+              }
+              if (comp.housingCount > 0 && housings.length !== comp.housingCount) {
+                throw new Error('Debe completar la información de todos los alojamientos.');
+              }
+            }
           }
           return {
-            serviceId: parseInt(s.serviceId),
-            housingCount,
+            serviceId: parseInt(s.serviceId, 10),
+            housingCount: totalHousingCount(s.components),
             technicians,
-            housings: housings.map(h => ({
-              measureCode: h.measureCode,
-              description: h.description,
-              nominalValue: h.nominalValue !== '' ? parseFloat(h.nominalValue) : null,
-              nominalUnit: h.nominalValue !== '' ? (h.nominalUnit || null) : null,
-              tolerance: h.tolerance || null
-            }))
+            components
           };
         });
 
-      if (servicesPayload.some(s => s.housingCount > 0 && s.housings.length !== s.housingCount)) {
-        showWarning('Debe completar la información de los alojamientos de cada servicio.');
+      if (
+        needsOrderHousings &&
+        servicesPayload.some((s) => {
+          const comps = s.components || [];
+          return comps.some((c) => c.housingCount > 0 && (c.housings || []).length !== c.housingCount);
+        })
+      ) {
+        showWarning('Debe completar la información de los alojamientos de cada componente.');
         setLoading(false);
         return;
       }
@@ -298,11 +355,20 @@ export default function WorkOrderNew() {
     }
   };
 
-  const currentHousings = editingServiceIdx !== null ? (orderServices[editingServiceIdx]?.housings || []) : [];
+  const currentHousings =
+    editingServiceIdx !== null && editingComponentIdx !== null
+      ? orderServices[editingServiceIdx]?.components?.[editingComponentIdx]?.housings || []
+      : [];
   let currentServiceName = 'Servicio';
+  let currentComponentName = 'Componente';
   if (editingServiceIdx !== null && orderServices[editingServiceIdx]?.serviceId) {
-    const svc = servicesForOrder.find(s => s.id === parseInt(orderServices[editingServiceIdx].serviceId));
+    const svc = servicesForOrder.find((s) => s.id === parseInt(orderServices[editingServiceIdx].serviceId, 10));
     currentServiceName = svc?.name || 'Servicio';
+  }
+  if (editingComponentIdx !== null) {
+    const compId = orderServices[editingServiceIdx]?.components?.[editingComponentIdx]?.componentId;
+    const compRow = componentsCatalog.find((c) => String(c.id) === String(compId));
+    currentComponentName = compRow?.name || GENERAL_COMPONENT_NAME;
   }
 
   return (
@@ -376,13 +442,17 @@ export default function WorkOrderNew() {
                   setOrderServices((prev) =>
                     prev.map((os) => ({
                       ...os,
-                      housingCount: 0,
-                      housings: [],
+                      components: (os.components || [createDefaultComponent(generalComponentId)]).map((c) => ({
+                        ...c,
+                        housingCount: 0,
+                        housings: []
+                      })),
                       technicians: os.technicians?.length ? os.technicians : [{ technicianId: '', shift: SHIFT_DAY }]
                     }))
                   );
                   setShowHousingsModal(false);
                   setEditingServiceIdx(null);
+                  setEditingComponentIdx(null);
                 }
               }}
             >
@@ -435,8 +505,8 @@ export default function WorkOrderNew() {
             <p style={{ marginTop: -4, marginBottom: 8, color: '#6e6b7b', fontSize: '0.9em' }}>
               {formData.serviceTypeId ? 'Servicios del tipo seleccionado. ' : 'Seleccione primero un Tipo de Servicio para filtrar los servicios. '}
               {needsOrderHousings
-                ? 'Agregue uno o más servicios. Para cada uno: seleccione el servicio, indique la cantidad de alojamientos y complete los datos.'
-                : 'Agregue uno o más servicios. La cantidad de alojamientos solo se solicita para el tipo «Reparación por Mecanizado».'}
+                ? 'Agregue servicios. En cada servicio defina uno o más componentes; en mecanizado, indique alojamientos por componente.'
+                : 'Agregue uno o más servicios. Los alojamientos solo aplican al tipo «Reparación por Mecanizado», por componente.'}
             </p>
             {orderServices.map((os, idx) => (
               <div key={idx} className="service-row" style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #e8e6ef' }}>
@@ -458,30 +528,7 @@ export default function WorkOrderNew() {
                     disabled={!formData.serviceTypeId}
                   />
                 </div>
-                {needsOrderHousings && (
-                <div style={{ flex: '1 1 100px', minWidth: 100 }}>
-                  <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Alojamientos</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={os.housingCount || ''}
-                    onChange={(e) => updateService(idx, 'housingCount', e.target.value)}
-                    placeholder="0"
-                  />
-                </div>
-                )}
                 <div style={{ display: 'flex', gap: 8 }}>
-                  {needsOrderHousings && (
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => openHousingsModalForService(idx)}
-                    title="Ver / Editar alojamientos"
-                    style={{ padding: '8px 12px' }}
-                  >
-                    📋
-                  </button>
-                  )}
                   <button
                     type="button"
                     className="btn-secondary"
@@ -520,6 +567,62 @@ export default function WorkOrderNew() {
                   ))}
                   <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={() => addTechnicianRow(idx)}>
                     + Agregar técnico
+                  </button>
+                </div>
+                <div style={{ width: '100%', marginTop: 10, padding: '10px 0 4px', borderTop: '1px dashed #e8e6ef' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#5c5966' }}>Componentes</span>
+                  {(os.components || [createDefaultComponent(generalComponentId)]).map((comp, ci) => (
+                    <div key={ci} style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      <div style={{ flex: '2 1 180px', minWidth: 140 }}>
+                        <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Componente</label>
+                        <select
+                          value={comp.componentId}
+                          onChange={(e) => updateServiceComponent(idx, ci, 'componentId', e.target.value)}
+                        >
+                          <option value="">Seleccionar...</option>
+                          {componentsCatalog.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {needsOrderHousings && (
+                        <>
+                          <div style={{ flex: '0 1 90px', minWidth: 80 }}>
+                            <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Alojamientos</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={comp.housingCount || ''}
+                              onChange={(e) => updateServiceComponent(idx, ci, 'housingCount', e.target.value)}
+                              placeholder="0"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            onClick={() => openHousingsModalForComponent(idx, ci)}
+                            title="Configurar alojamientos"
+                            style={{ padding: '8px 12px' }}
+                          >
+                            📋
+                          </button>
+                        </>
+                      )}
+                      {(os.components || []).length > 1 && (
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ padding: '8px 12px' }}
+                          onClick={() => removeComponentFromService(idx, ci)}
+                          title="Quitar componente"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={() => addComponentToService(idx)}>
+                    + Agregar componente
                   </button>
                 </div>
               </div>
@@ -568,12 +671,12 @@ export default function WorkOrderNew() {
         </div>
       </form>
 
-      {needsOrderHousings && showHousingsModal && editingServiceIdx !== null && (
+      {needsOrderHousings && showHousingsModal && editingServiceIdx !== null && editingComponentIdx !== null && (
         <div className="modal-overlay" onClick={() => closeHousingsModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 750 }}>
-            <h2>Alojamientos — {currentServiceName}</h2>
+            <h2>Alojamientos — {currentServiceName} / {currentComponentName}</h2>
             <p style={{ marginTop: -8, color: '#6e6b7b' }}>
-              Complete la información de cada alojamiento. Cada servicio comienza con A, B, C...
+              Complete la información de cada alojamiento. Cada componente comienza con A, B, C...
             </p>
             <div style={{ overflowX: 'auto' }}>
               <table className="data-table">
@@ -648,3 +751,4 @@ export default function WorkOrderNew() {
     </div>
   );
 }
+

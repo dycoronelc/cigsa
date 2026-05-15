@@ -476,8 +476,9 @@ export default function TechnicianWorkOrderDetail() {
   const showHousingMetrology = isMachiningRepairByTypeName(order.service_type_name);
 
   const serviceLabelForMeasurementRow = (row) => {
+    const comp = row.component_name ? ` [${row.component_name}]` : '';
     const fromJoin = [row.service_code, row.service_name].filter(Boolean).join(' — ');
-    if (fromJoin) return fromJoin;
+    if (fromJoin) return fromJoin + comp;
     const wosId = row.work_order_service_id;
     if (wosId != null && Array.isArray(order.services) && order.services.length > 0) {
       const svc = order.services.find((s) => Number(s.id) === Number(wosId));

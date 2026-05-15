@@ -47,6 +47,17 @@ CREATE TABLE IF NOT EXISTS service_types (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- Components master (componentes de intervención por servicio en OT)
+CREATE TABLE IF NOT EXISTS components (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(100) UNIQUE NOT NULL,
+  description TEXT,
+  is_system BOOLEAN DEFAULT FALSE COMMENT 'Componentes de sistema no eliminables',
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- Locations table (Maestro de ubicaciones para OT)
 CREATE TABLE IF NOT EXISTS locations (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -180,6 +191,18 @@ CREATE TABLE IF NOT EXISTS work_order_services (
   UNIQUE KEY unique_work_order_service (work_order_id, service_id)
 );
 
+-- Componentes por línea de servicio en la OT (cada servicio puede tener uno o más componentes)
+CREATE TABLE IF NOT EXISTS work_order_service_components (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  work_order_service_id INT NOT NULL,
+  component_id INT NOT NULL,
+  housing_count INT DEFAULT 0 COMMENT 'Cantidad de alojamientos para este componente',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (work_order_service_id) REFERENCES work_order_services(id) ON DELETE CASCADE,
+  FOREIGN KEY (component_id) REFERENCES components(id) ON DELETE RESTRICT,
+  UNIQUE KEY unique_wos_component (work_order_service_id, component_id)
+);
+
 -- Técnicos por línea de servicio de la OT (turno Día/DS o Noche/NS)
 CREATE TABLE IF NOT EXISTS work_order_service_technicians (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -192,12 +215,13 @@ CREATE TABLE IF NOT EXISTS work_order_service_technicians (
   UNIQUE KEY unique_wos_technician (work_order_service_id, technician_id)
 );
 
--- Work Order Service Housings (Alojamientos intervenidos en la OT, por servicio - cada servicio tiene A, B, C...)
+-- Work Order Service Housings (Alojamientos por componente - cada componente tiene A, B, C...)
 CREATE TABLE IF NOT EXISTS work_order_housings (
   id INT PRIMARY KEY AUTO_INCREMENT,
   work_order_id INT NOT NULL,
-  work_order_service_id INT NULL COMMENT 'Servicio al que pertenece (opcional para compatibilidad)',
-  measure_code VARCHAR(10) NOT NULL COMMENT 'Correlativo A, B, C... por servicio (cada servicio empieza en A)',
+  work_order_service_id INT NULL COMMENT 'Servicio (denormalizado para consultas)',
+  work_order_service_component_id INT NULL COMMENT 'Componente al que pertenece el alojamiento',
+  measure_code VARCHAR(10) NOT NULL COMMENT 'Correlativo A, B, C... por componente',
   description TEXT,
   nominal_value DECIMAL(10, 3),
   nominal_unit VARCHAR(20),
@@ -206,7 +230,8 @@ CREATE TABLE IF NOT EXISTS work_order_housings (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
   FOREIGN KEY (work_order_service_id) REFERENCES work_order_services(id) ON DELETE CASCADE,
-  UNIQUE KEY unique_work_order_service_measure (work_order_service_id, measure_code)
+  FOREIGN KEY (work_order_service_component_id) REFERENCES work_order_service_components(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_wosc_measure (work_order_service_component_id, measure_code)
 );
 
 -- Measurements per housing (X1/Y1 + unidad) linked to a measurement event (initial/final)

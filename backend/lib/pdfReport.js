@@ -172,22 +172,104 @@ function housingMeasurementRowHasData(hm) {
   );
 }
 
+/** Componentes de una línea de servicio (o legacy con alojamientos planos en el servicio). */
+function serviceComponentsList(svc) {
+  const comps = svc?.components;
+  if (Array.isArray(comps) && comps.length > 0) return comps;
+  const housings = svc?.housings || [];
+  if (housings.length === 0) return [];
+  return [
+    {
+      component_name: 'Componente General',
+      component_id: null,
+      housings,
+      housing_count: housings.length
+    }
+  ];
+}
+
+function housingCountForComponent(comp) {
+  const list = comp?.housings;
+  if (Array.isArray(list) && list.length > 0) return list.length;
+  return Number(comp?.housing_count) || 0;
+}
+
+function totalHousingCountForService(svc) {
+  const comps = serviceComponentsList(svc);
+  if (comps.length > 0) {
+    return comps.reduce((sum, c) => sum + housingCountForComponent(c), 0);
+  }
+  return (svc?.housings?.length || svc?.housing_count) || 0;
+}
+
+function housingBelongsToComponent(h, comp) {
+  const compId = comp?.component_id ?? comp?.componentId;
+  if (compId != null && h.component_id != null) {
+    return String(h.component_id) === String(compId);
+  }
+  const woscId = comp?.id;
+  if (woscId != null && h.work_order_service_component_id != null) {
+    return String(h.work_order_service_component_id) === String(woscId);
+  }
+  const compName = comp?.component_name;
+  if (compName && h.component_name) return h.component_name === compName;
+  const compHousings = comp?.housings || [];
+  if (compHousings.length > 0) {
+    return compHousings.some((ch) => ch.id != null && h.id != null && String(ch.id) === String(h.id));
+  }
+  return serviceComponentsList({ components: [comp] }).length === 1;
+}
+
+function housingComponentLabel(h, hm) {
+  return (
+    hm?.component_name ||
+    h?.component_name ||
+    'Componente General'
+  );
+}
+
+function housingServiceLabel(h, hm, orderServices) {
+  const fromHm = [hm?.service_code, hm?.service_name].filter(Boolean).join(' — ');
+  if (fromHm) return fromHm;
+  const fromH = [h?.service_code, h?.service_name].filter(Boolean).join(' — ');
+  if (fromH) return fromH;
+  const wosId = h?.work_order_service_id ?? hm?.work_order_service_id;
+  if (wosId != null && Array.isArray(orderServices)) {
+    const s = orderServices.find((x) => String(x.id) === String(wosId));
+    if (s) return [s.service_code, s.service_name].filter(Boolean).join(' — ') || '-';
+  }
+  return '-';
+}
+
 /**
- * Cuenta alojamientos del servicio que figuran en la medición final del reporte con datos registrados.
- * Usa la misma medición final que la sección "Mediciones finales" (la más reciente con datos).
+ * Cuenta alojamientos del componente con medición final registrada (X1/Y1/unidad).
  */
-function countExecutedHousingsWithFinalMeasurement(svc, finalMeasurement) {
+function countExecutedHousingsForComponent(comp, finalMeasurement) {
   if (!finalMeasurement) return 0;
   const rows = finalMeasurement.housing_measurements || finalMeasurement.housingMeasurements || [];
-  const housings = svc.housings || [];
+  const compHousings = comp?.housings || [];
   const withData = new Set();
   for (const hm of rows) {
     const hid = hm.housing_id ?? hm.housingId;
-    if (hid == null || !housings.some((h) => h.id == hid)) continue;
+    if (hid == null) continue;
+    const hMatch =
+      compHousings.some((h) => h.id == hid) ||
+      (comp?.component_name && hm.component_name === comp.component_name);
+    if (!hMatch) continue;
     if (!housingMeasurementRowHasData(hm)) continue;
     withData.add(String(hid));
   }
   return withData.size;
+}
+
+/**
+ * Cuenta alojamientos del servicio que figuran en la medición final del reporte con datos registrados.
+ */
+function countExecutedHousingsWithFinalMeasurement(svc, finalMeasurement) {
+  if (!finalMeasurement) return 0;
+  const comps = serviceComponentsList(svc);
+  if (comps.length === 0) return 0;
+  return comps.reduce((sum, c) => sum + countExecutedHousingsForComponent(c, finalMeasurement), 0);
 }
 
 const PHOTO_GROUP_NONE = '__none__';
@@ -284,7 +366,7 @@ function measurementRowHeight(doc, cells) {
 }
 
 /** Altura de una fila de tabla medición inicial/final. */
-function measurementTableRowHeight(doc, hm, byId, MET_COL) {
+function measurementTableRowHeight(doc, hm, byId, MET_COL, orderServices) {
   const hHousing = byId(hm.housing_id);
   const descStr = hm.housing_description || hHousing?.description || '-';
   const nom =
@@ -294,6 +376,8 @@ function measurementTableRowHeight(doc, hm, byId, MET_COL) {
         ? `${hHousing.nominal_value} ${hHousing.nominal_unit || ''}`.trim()
         : '-';
   return measurementRowHeight(doc, [
+    { text: housingServiceLabel(hHousing, hm, orderServices), width: MET_COL.svc },
+    { text: housingComponentLabel(hHousing, hm), width: MET_COL.comp },
     { text: hm.measure_code || hHousing?.measure_code || '-', width: MET_COL.med },
     { text: descStr, width: MET_COL.desc },
     { text: nom, width: MET_COL.nom },
@@ -304,16 +388,78 @@ function measurementTableRowHeight(doc, hm, byId, MET_COL) {
   ]);
 }
 
+function buildMetrologyColumns() {
+  const MET_COL = { svc: 88, comp: 78, med: 34, nom: 48, tol: 42, x1: 38, y1: 38, un: 28 };
+  MET_COL.desc =
+    CONTENT_WIDTH - MET_COL.svc - MET_COL.comp - MET_COL.med - MET_COL.nom - MET_COL.tol - MET_COL.x1 - MET_COL.y1 - MET_COL.un;
+  const metX = {
+    svc: MARGIN,
+    comp: MARGIN + MET_COL.svc,
+    med: MARGIN + MET_COL.svc + MET_COL.comp,
+    desc: MARGIN + MET_COL.svc + MET_COL.comp + MET_COL.med,
+    nom: MARGIN + MET_COL.svc + MET_COL.comp + MET_COL.med + MET_COL.desc,
+    tol: MARGIN + MET_COL.svc + MET_COL.comp + MET_COL.med + MET_COL.desc + MET_COL.nom,
+    x1: MARGIN + MET_COL.svc + MET_COL.comp + MET_COL.med + MET_COL.desc + MET_COL.nom + MET_COL.tol,
+    y1:
+      MARGIN + MET_COL.svc + MET_COL.comp + MET_COL.med + MET_COL.desc + MET_COL.nom + MET_COL.tol + MET_COL.x1,
+    un:
+      MARGIN +
+      MET_COL.svc +
+      MET_COL.comp +
+      MET_COL.med +
+      MET_COL.desc +
+      MET_COL.nom +
+      MET_COL.tol +
+      MET_COL.x1 +
+      MET_COL.y1,
+  };
+  return { MET_COL, metX };
+}
+
+function drawMeasurementTableHeaders(doc, metX, MET_COL, y) {
+  doc.font('Helvetica').fontSize(8);
+  doc.text('Servicio', metX.svc, y, { width: MET_COL.svc });
+  doc.text('Componente', metX.comp, y, { width: MET_COL.comp });
+  doc.text('Medida', metX.med, y, { width: MET_COL.med });
+  doc.text('Descripción', metX.desc, y, { width: MET_COL.desc });
+  doc.text('Nominal', metX.nom, y, { width: MET_COL.nom });
+  doc.text('Tolerancia', metX.tol, y, { width: MET_COL.tol });
+  doc.text('X1', metX.x1, y, { width: MET_COL.x1 });
+  doc.text('Y1', metX.y1, y, { width: MET_COL.y1 });
+  doc.text('Unidad', metX.un, y, { width: MET_COL.un });
+}
+
+function drawMeasurementTableRow(doc, hm, byId, MET_COL, metX, y, orderServices) {
+  const h = byId(hm.housing_id);
+  const descStr = hm.housing_description || h?.description || '-';
+  const nom =
+    hm.nominal_value != null
+      ? `${hm.nominal_value} ${(hm.nominal_unit || '').trim()}`.trim() || '-'
+      : h && h.nominal_value != null
+        ? `${h.nominal_value} ${h.nominal_unit || ''}`.trim()
+        : '-';
+  doc.font('Helvetica').fontSize(8);
+  doc.text(housingServiceLabel(h, hm, orderServices), metX.svc, y, { width: MET_COL.svc });
+  doc.text(housingComponentLabel(h, hm), metX.comp, y, { width: MET_COL.comp });
+  doc.text(hm.measure_code || h?.measure_code || '-', metX.med, y, { width: MET_COL.med });
+  doc.text(descStr, metX.desc, y, { width: MET_COL.desc });
+  doc.text(nom, metX.nom, y, { width: MET_COL.nom });
+  doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), metX.tol, y, { width: MET_COL.tol });
+  doc.text(String(hm.x1 ?? '-'), metX.x1, y, { width: MET_COL.x1 });
+  doc.text(String(hm.y1 ?? '-'), metX.y1, y, { width: MET_COL.y1 });
+  doc.text(String(hm.unit ?? '-'), metX.un, y, { width: MET_COL.un });
+}
+
 /**
  * Espacio vertical necesario para: línea Fecha + cabeceras de tabla + regla + 1ª fila (si hay filas).
  * Así el título de sección no queda huérfano y no exigimos altura imposible si hay muchas filas.
  */
-function spaceForMeasurementTableStart(doc, m, byId, MET_COL) {
+function spaceForMeasurementTableStart(doc, m, byId, MET_COL, orderServices) {
   const hmList = m.housing_measurements || m.housingMeasurements || [];
   let h = 12;
   if (hmList.length === 0) return h;
-  doc.font('Helvetica').fontSize(9);
-  const firstRowH = measurementTableRowHeight(doc, hmList[0], byId, MET_COL);
+  doc.font('Helvetica').fontSize(8);
+  const firstRowH = measurementTableRowHeight(doc, hmList[0], byId, MET_COL, orderServices);
   h += 14 + 8 + firstRowH;
   return h;
 }
@@ -502,7 +648,7 @@ export async function generateWorkOrderReport(orderData) {
       const bulletW = CONTENT_WIDTH - 20;
       services.forEach((svc) => {
         const name = svc.service_name || svc.service_code || 'Servicio';
-        const count = (svc.housings && svc.housings.length) || svc.housing_count || 0;
+        const count = totalHousingCountForService(svc);
         const techBits =
           Array.isArray(svc.technicians) && svc.technicians.length > 0
             ? svc.technicians
@@ -520,37 +666,71 @@ export async function generateWorkOrderReport(orderData) {
           : '';
         const line = `• ${name}${techSuffix}${housingSuffix}`;
         doc.font('Helvetica').fontSize(10);
-        const blockH = doc.heightOfString(line, { width: bulletW });
+        let blockH = doc.heightOfString(line, { width: bulletW });
+        const comps = showHousingMetrology ? serviceComponentsList(svc) : [];
+        for (const comp of comps) {
+          const cCount = housingCountForComponent(comp);
+          const compLine = `    ◦ ${comp.component_name || 'Componente'}: ${cCount} alojamiento${cCount !== 1 ? 's' : ''}`;
+          blockH += doc.heightOfString(compLine, { width: bulletW - 12 }) + 4;
+        }
         y = ensureSpace(doc, reportDate, y, blockH + 6);
         doc.text(line, MARGIN + 10, y, { width: bulletW });
-        y += blockH + 6;
+        let subY = y + doc.heightOfString(line, { width: bulletW }) + 4;
+        if (comps.length > 0) {
+          doc.fontSize(9).fillColor('#444');
+          for (const comp of comps) {
+            const cCount = housingCountForComponent(comp);
+            const compLine = `    ◦ ${comp.component_name || 'Componente'}: ${cCount} alojamiento${cCount !== 1 ? 's' : ''}`;
+            doc.text(compLine, MARGIN + 18, subY, { width: bulletW - 12 });
+            subY += doc.heightOfString(compLine, { width: bulletW - 12 }) + 3;
+          }
+          doc.fontSize(10).fillColor('black');
+        }
+        y = subY + 4;
       });
     }
     y += 8;
 
     if (showHousingMetrology) {
-      const tableEstimatedHeight = 20 + services.length * 28 + 20;
+      let rowCount = 0;
+      services.forEach((svc) => {
+        const comps = serviceComponentsList(svc);
+        rowCount += comps.length > 0 ? comps.length : 1;
+      });
+      const tableEstimatedHeight = 20 + rowCount * 28 + 20;
       y = ensureSpace(doc, reportDate, y, tableEstimatedHeight);
 
-      doc.font('Helvetica-Bold').fontSize(9);
+      const svcColW = 200;
+      const compColW = 150;
+      doc.font('Helvetica-Bold').fontSize(8);
       doc.rect(MARGIN, y, CONTENT_WIDTH, 18).fillAndStroke('#eee', '#333');
-      doc.fillColor('black').text('Servicio', MARGIN + 8, y + 4, { width: 280 });
-      doc.text('Aloj. cotizados', MARGIN + 290, y + 4, { width: 80 });
-      doc.text('Aloj. ejecutados', MARGIN + 372, y + 4);
+      doc.fillColor('black').text('Servicio', MARGIN + 6, y + 5, { width: svcColW });
+      doc.text('Componente', MARGIN + 6 + svcColW, y + 5, { width: compColW });
+      doc.text('Aloj. cot.', MARGIN + 6 + svcColW + compColW, y + 5, { width: 56 });
+      doc.text('Aloj. ejec.', MARGIN + 6 + svcColW + compColW + 56, y + 5);
       y += 20;
-      doc.font('Helvetica').fontSize(9).fillColor('black');
-      const serviceColWidth = 280;
+      doc.font('Helvetica').fontSize(8).fillColor('black');
       services.forEach((svc) => {
-        const cot = svc.housing_count || 0;
-        const ejec = countExecutedHousingsWithFinalMeasurement(svc, finalMeasurements[0] || null);
         const name = svc.service_name || svc.service_code || '-';
-        const nameHeight = doc.heightOfString(name, { width: serviceColWidth });
-        const rowHeight = Math.max(20, Math.ceil(nameHeight) + 10);
-        doc.rect(MARGIN, y, CONTENT_WIDTH, rowHeight).stroke();
-        doc.text(name, MARGIN + 8, y + 5, { width: serviceColWidth });
-        doc.text(String(cot), MARGIN + 290, y + 5, { width: 80 });
-        doc.text(String(ejec), MARGIN + 372, y + 5);
-        y += rowHeight;
+        const comps = serviceComponentsList(svc);
+        const rows = comps.length > 0 ? comps : [{ component_name: '-', housing_count: svc.housing_count || 0, housings: [] }];
+        rows.forEach((comp) => {
+          const cot = housingCountForComponent(comp);
+          const ejec = countExecutedHousingsForComponent(comp, finalMeasurements[0] || null);
+          const compName = comp.component_name || 'Componente General';
+          const rowH = Math.max(
+            18,
+            Math.ceil(doc.heightOfString(name, { width: svcColW - 4 })) +
+              Math.ceil(doc.heightOfString(compName, { width: compColW - 4 })) +
+              8
+          );
+          doc.rect(MARGIN, y, CONTENT_WIDTH, rowH).stroke();
+          doc.text(name, MARGIN + 6, y + 4, { width: svcColW });
+          doc.text(compName, MARGIN + 6 + svcColW, y + 4, { width: compColW });
+          doc.text(String(cot), MARGIN + 6 + svcColW + compColW, y + 4, { width: 56 });
+          doc.text(String(ejec), MARGIN + 6 + svcColW + compColW + 56, y + 4);
+          y += rowH;
+        });
       });
       y += 16;
     }
@@ -622,29 +802,23 @@ export async function generateWorkOrderReport(orderData) {
     const housings = serviceHousings.length ? serviceHousings : [];
     const byId = (id) => housings.find((h) => h.id === id) || {};
 
-    const medColW = 38;
-    const nomColW = 54;
-    const tolColW = 54;
-    const unitColW = 34;
-    const descColW = CONTENT_WIDTH - medColW - nomColW - tolColW - unitColW;
-    const xNom = MARGIN + medColW + descColW;
-    const xTol = xNom + nomColW;
-    const xUnit = xTol + tolColW;
-
-    if (housings.length === 0) {
-      y = ensureSpace(doc, reportDate, y, 14 + 20);
-    } else {
-      doc.font('Helvetica').fontSize(9);
-      const h0 = housings[0];
-      const row0H = measurementRowHeight(doc, [
-        { text: h0.measure_code || '-', width: medColW },
-        { text: h0.description || '-', width: descColW },
-        { text: h0.nominal_value != null ? String(h0.nominal_value) : '-', width: nomColW },
-        { text: h0.tolerance || '-', width: tolColW },
-        { text: h0.nominal_unit || '-', width: unitColW },
-      ]);
-      y = ensureSpace(doc, reportDate, y, 14 + 14 + 8 + row0H);
-    }
+    const nomSvcW = 100;
+    const nomCompW = 88;
+    const nomMedW = 34;
+    const nomNomW = 48;
+    const nomTolW = 48;
+    const nomUnitW = 30;
+    const nomDescW =
+      CONTENT_WIDTH - nomSvcW - nomCompW - nomMedW - nomNomW - nomTolW - nomUnitW;
+    const nomX = {
+      svc: MARGIN,
+      comp: MARGIN + nomSvcW,
+      med: MARGIN + nomSvcW + nomCompW,
+      desc: MARGIN + nomSvcW + nomCompW + nomMedW,
+      nom: MARGIN + nomSvcW + nomCompW + nomMedW + nomDescW,
+      tol: MARGIN + nomSvcW + nomCompW + nomMedW + nomDescW + nomNomW,
+      unit: MARGIN + nomSvcW + nomCompW + nomMedW + nomDescW + nomNomW + nomTolW,
+    };
 
     doc.font('Helvetica-Bold').fontSize(10).fillColor('black').text('MEDIDAS NOMINALES', MARGIN, y);
     y += 14;
@@ -652,59 +826,77 @@ export async function generateWorkOrderReport(orderData) {
       doc.font('Helvetica').text('Sin alojamientos definidos.', MARGIN, y);
       y += 20;
     } else {
-      doc.font('Helvetica').fontSize(9);
-      doc.text('Medida', MARGIN, y, { width: medColW });
-      doc.text('Descripción', MARGIN + medColW, y, { width: descColW });
-      doc.text('Nominal', xNom, y, { width: nomColW });
-      doc.text('Tolerancia', xTol, y, { width: tolColW });
-      doc.text('Unidad', xUnit, y, { width: unitColW });
-      y += 14;
-      doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
-      y += 8;
-      housings.forEach((h, rowIdx) => {
-        const descStr = h.description || '-';
-        const nom = h.nominal_value != null ? String(h.nominal_value) : '-';
-        const tol = h.tolerance || '-';
-        const unit = h.nominal_unit || '-';
-        const rowH = measurementRowHeight(doc, [
-          { text: h.measure_code || '-', width: medColW },
-          { text: descStr, width: descColW },
-          { text: nom, width: nomColW },
-          { text: tol, width: tolColW },
-          { text: unit, width: unitColW },
-        ]);
-        if (rowIdx > 0) {
-          y = ensureSpace(doc, reportDate, y, rowH);
-        }
-        doc.text(h.measure_code || '-', MARGIN, y, { width: medColW });
-        doc.text(descStr, MARGIN + medColW, y, { width: descColW });
-        doc.text(nom, xNom, y, { width: nomColW });
-        doc.text(tol, xTol, y, { width: tolColW });
-        doc.text(unit, xUnit, y, { width: unitColW });
-        y += rowH;
+      let hasAnyNominalRow = false;
+      services.forEach((svc) => {
+        const svcName = [svc.service_code, svc.service_name].filter(Boolean).join(' — ') || 'Servicio';
+        const comps = serviceComponentsList(svc);
+        comps.forEach((comp) => {
+          const compHousings = (comp.housings || []).length
+            ? comp.housings
+            : housings.filter((h) => housingBelongsToComponent(h, comp));
+          if (compHousings.length === 0) return;
+          hasAnyNominalRow = true;
+          const sectionTitle = `${svcName} — ${comp.component_name || 'Componente'}`;
+          const titleH = doc.heightOfString(sectionTitle, { width: CONTENT_WIDTH }) + 8;
+          y = ensureSpace(doc, reportDate, y, titleH + 40);
+          doc.font('Helvetica-Bold').fontSize(9).text(sectionTitle, MARGIN, y);
+          y += titleH;
+          doc.font('Helvetica').fontSize(8);
+          doc.text('Servicio', nomX.svc, y, { width: nomSvcW });
+          doc.text('Componente', nomX.comp, y, { width: nomCompW });
+          doc.text('Medida', nomX.med, y, { width: nomMedW });
+          doc.text('Descripción', nomX.desc, y, { width: nomDescW });
+          doc.text('Nominal', nomX.nom, y, { width: nomNomW });
+          doc.text('Tolerancia', nomX.tol, y, { width: nomTolW });
+          doc.text('Unidad', nomX.unit, y, { width: nomUnitW });
+          y += 12;
+          doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
+          y += 6;
+          compHousings.forEach((h, rowIdx) => {
+            const descStr = h.description || '-';
+            const nom = h.nominal_value != null ? String(h.nominal_value) : '-';
+            const tol = h.tolerance || '-';
+            const unit = h.nominal_unit || '-';
+            const rowH = measurementRowHeight(doc, [
+              { text: svcName, width: nomSvcW },
+              { text: h.component_name || comp.component_name || '-', width: nomCompW },
+              { text: h.measure_code || '-', width: nomMedW },
+              { text: descStr, width: nomDescW },
+              { text: nom, width: nomNomW },
+              { text: tol, width: nomTolW },
+              { text: unit, width: nomUnitW },
+            ]);
+            if (rowIdx > 0) {
+              y = ensureSpace(doc, reportDate, y, rowH);
+            }
+            doc.text(svcName, nomX.svc, y, { width: nomSvcW });
+            doc.text(h.component_name || comp.component_name || '-', nomX.comp, y, { width: nomCompW });
+            doc.text(h.measure_code || '-', nomX.med, y, { width: nomMedW });
+            doc.text(descStr, nomX.desc, y, { width: nomDescW });
+            doc.text(nom, nomX.nom, y, { width: nomNomW });
+            doc.text(tol, nomX.tol, y, { width: nomTolW });
+            doc.text(unit, nomX.unit, y, { width: nomUnitW });
+            y += rowH;
+          });
+          y += 10;
+        });
       });
-      y += 16;
+      if (!hasAnyNominalRow) {
+        doc.font('Helvetica').text('Sin alojamientos definidos por componente.', MARGIN, y);
+        y += 20;
+      } else {
+        y += 6;
+      }
     }
 
-    /** Columnas medidas inicial/final: descripción usa el ancho restante del contenido. */
-    const MET_COL = { med: 40, nom: 56, tol: 48, x1: 44, y1: 44, un: 32 };
-    MET_COL.desc = CONTENT_WIDTH - MET_COL.med - MET_COL.nom - MET_COL.tol - MET_COL.x1 - MET_COL.y1 - MET_COL.un;
-    const metX = {
-      med: MARGIN,
-      desc: MARGIN + MET_COL.med,
-      nom: MARGIN + MET_COL.med + MET_COL.desc,
-      tol: MARGIN + MET_COL.med + MET_COL.desc + MET_COL.nom,
-      x1: MARGIN + MET_COL.med + MET_COL.desc + MET_COL.nom + MET_COL.tol,
-      y1: MARGIN + MET_COL.med + MET_COL.desc + MET_COL.nom + MET_COL.tol + MET_COL.x1,
-      un: MARGIN + MET_COL.med + MET_COL.desc + MET_COL.nom + MET_COL.tol + MET_COL.x1 + MET_COL.y1,
-    };
+    const { MET_COL, metX } = buildMetrologyColumns();
 
     {
       const titleH = 14;
       const needBeforeTitle =
         initialMeasurements.length === 0
           ? titleH + 20
-          : titleH + spaceForMeasurementTableStart(doc, initialMeasurements[0], byId, MET_COL);
+          : titleH + spaceForMeasurementTableStart(doc, initialMeasurements[0], byId, MET_COL, services);
       y = ensureSpace(doc, reportDate, y, needBeforeTitle);
     }
 
@@ -717,38 +909,21 @@ export async function generateWorkOrderReport(orderData) {
       initialMeasurements.forEach((m, idx) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
         if (idx > 0) {
-          y = ensureSpace(doc, reportDate, y, spaceForMeasurementTableStart(doc, m, byId, MET_COL));
+          y = ensureSpace(doc, reportDate, y, spaceForMeasurementTableStart(doc, m, byId, MET_COL, services));
         }
         doc.font('Helvetica').fontSize(9).fillColor('black').text(`Fecha: ${formatDateTime(m.measurement_date)}`, MARGIN, y);
         y += 12;
         if (hmList.length > 0) {
-          doc.font('Helvetica').fontSize(9);
-          doc.text('Medida', metX.med, y, { width: MET_COL.med });
-          doc.text('Descripción', metX.desc, y, { width: MET_COL.desc });
-          doc.text('Nominal', metX.nom, y, { width: MET_COL.nom });
-          doc.text('Tolerancia', metX.tol, y, { width: MET_COL.tol });
-          doc.text('X1', metX.x1, y, { width: MET_COL.x1 });
-          doc.text('Y1', metX.y1, y, { width: MET_COL.y1 });
-          doc.text('Unidad', metX.un, y, { width: MET_COL.un });
+          drawMeasurementTableHeaders(doc, metX, MET_COL, y);
           y += 14;
           doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
           y += 8;
-          doc.font('Helvetica').fontSize(9);
           hmList.forEach((hm, rowIdx) => {
-            const h = byId(hm.housing_id);
-            const rowH = measurementTableRowHeight(doc, hm, byId, MET_COL);
+            const rowH = measurementTableRowHeight(doc, hm, byId, MET_COL, services);
             if (rowIdx > 0) {
               y = ensureSpace(doc, reportDate, y, rowH);
             }
-            const descStr = hm.housing_description || h?.description || '-';
-            const nom = (hm.nominal_value != null) ? `${hm.nominal_value} ${(hm.nominal_unit || '').trim()}`.trim() || '-' : (h && (h.nominal_value != null) ? `${h.nominal_value} ${h.nominal_unit || ''}`.trim() : '-');
-            doc.text(hm.measure_code || h?.measure_code || '-', metX.med, y, { width: MET_COL.med });
-            doc.text(descStr, metX.desc, y, { width: MET_COL.desc });
-            doc.text(nom, metX.nom, y, { width: MET_COL.nom });
-            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), metX.tol, y, { width: MET_COL.tol });
-            doc.text(String(hm.x1 ?? '-'), metX.x1, y, { width: MET_COL.x1 });
-            doc.text(String(hm.y1 ?? '-'), metX.y1, y, { width: MET_COL.y1 });
-            doc.text(String(hm.unit ?? '-'), metX.un, y, { width: MET_COL.un });
+            drawMeasurementTableRow(doc, hm, byId, MET_COL, metX, y, services);
             y += rowH;
           });
           y += 4;
@@ -770,7 +945,7 @@ export async function generateWorkOrderReport(orderData) {
       const needBeforeTitle =
         finalMeasurements.length === 0
           ? titleH + 20
-          : titleH + spaceForMeasurementTableStart(doc, finalMeasurements[0], byId, MET_COL);
+          : titleH + spaceForMeasurementTableStart(doc, finalMeasurements[0], byId, MET_COL, services);
       y = ensureSpace(doc, reportDate, y, needBeforeTitle);
     }
 
@@ -783,38 +958,21 @@ export async function generateWorkOrderReport(orderData) {
       finalMeasurements.forEach((m, idx) => {
         const hmList = m.housing_measurements || m.housingMeasurements || [];
         if (idx > 0) {
-          y = ensureSpace(doc, reportDate, y, spaceForMeasurementTableStart(doc, m, byId, MET_COL));
+          y = ensureSpace(doc, reportDate, y, spaceForMeasurementTableStart(doc, m, byId, MET_COL, services));
         }
         doc.font('Helvetica').fontSize(9).fillColor('black').text(`Fecha: ${formatDateTime(m.measurement_date)}`, MARGIN, y);
         y += 12;
         if (hmList.length > 0) {
-          doc.font('Helvetica').fontSize(9);
-          doc.text('Medida', metX.med, y, { width: MET_COL.med });
-          doc.text('Descripción', metX.desc, y, { width: MET_COL.desc });
-          doc.text('Nominal', metX.nom, y, { width: MET_COL.nom });
-          doc.text('Tolerancia', metX.tol, y, { width: MET_COL.tol });
-          doc.text('X1', metX.x1, y, { width: MET_COL.x1 });
-          doc.text('Y1', metX.y1, y, { width: MET_COL.y1 });
-          doc.text('Unidad', metX.un, y, { width: MET_COL.un });
+          drawMeasurementTableHeaders(doc, metX, MET_COL, y);
           y += 14;
           doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
           y += 8;
-          doc.font('Helvetica').fontSize(9);
           hmList.forEach((hm, rowIdx) => {
-            const h = byId(hm.housing_id);
-            const rowH = measurementTableRowHeight(doc, hm, byId, MET_COL);
+            const rowH = measurementTableRowHeight(doc, hm, byId, MET_COL, services);
             if (rowIdx > 0) {
               y = ensureSpace(doc, reportDate, y, rowH);
             }
-            const descStr = hm.housing_description || h?.description || '-';
-            const nom = (hm.nominal_value != null) ? `${hm.nominal_value} ${(hm.nominal_unit || '').trim()}`.trim() || '-' : (h && (h.nominal_value != null) ? `${h.nominal_value} ${h.nominal_unit || ''}`.trim() : '-');
-            doc.text(hm.measure_code || h?.measure_code || '-', metX.med, y, { width: MET_COL.med });
-            doc.text(descStr, metX.desc, y, { width: MET_COL.desc });
-            doc.text(nom, metX.nom, y, { width: MET_COL.nom });
-            doc.text(String(hm.tolerance ?? h?.tolerance ?? '-'), metX.tol, y, { width: MET_COL.tol });
-            doc.text(String(hm.x1 ?? '-'), metX.x1, y, { width: MET_COL.x1 });
-            doc.text(String(hm.y1 ?? '-'), metX.y1, y, { width: MET_COL.y1 });
-            doc.text(String(hm.unit ?? '-'), metX.un, y, { width: MET_COL.un });
+            drawMeasurementTableRow(doc, hm, byId, MET_COL, metX, y, services);
             y += rowH;
           });
           y += 4;
