@@ -17,6 +17,8 @@ import {
   mapHousingFromApi,
   totalHousingCount
 } from '../../utils/workOrderComponents';
+import WorkOrderServiceComponentsEditor from '../../components/WorkOrderComponentsEditor';
+import '../../components/WorkOrderComponentsEditor.css';
 import './WorkOrderDetail.css';
 
 export default function WorkOrderDetail() {
@@ -339,6 +341,55 @@ export default function WorkOrderDetail() {
       num = Math.floor((num - 1) / 26);
     }
     return s;
+  };
+
+  const addComponentToService = (serviceIdx) => {
+    const next = [...(editData.services || [])];
+    const comps = [...(next[serviceIdx].components || []), createDefaultComponent(generalComponentId)];
+    next[serviceIdx] = { ...next[serviceIdx], components: comps };
+    setEditData({ ...editData, services: next });
+  };
+
+  const removeComponentFromService = (serviceIdx, componentIdx) => {
+    const next = [...(editData.services || [])];
+    const comps = (next[serviceIdx].components || []).filter((_, i) => i !== componentIdx);
+    next[serviceIdx] = {
+      ...next[serviceIdx],
+      components: comps.length ? comps : [createDefaultComponent(generalComponentId)]
+    };
+    setEditData({ ...editData, services: next });
+  };
+
+  const updateServiceComponent = (serviceIdx, componentIdx, field, value) => {
+    const next = [...(editData.services || [])];
+    const comps = [...(next[serviceIdx].components || [])];
+    if (!comps[componentIdx]) return;
+    comps[componentIdx] = { ...comps[componentIdx], [field]: value };
+    if (field === 'housingCount' && needsOrderHousings) {
+      const count = Number(value) || 0;
+      const existing = comps[componentIdx].housings || [];
+      if (count > 0) {
+        comps[componentIdx].housings = Array.from({ length: count }).map((_, i) => {
+          if (existing[i]) return { ...existing[i], measureCode: existing[i].measureCode || numberToLetters(i + 1) };
+          return {
+            measureCode: numberToLetters(i + 1),
+            description: '',
+            nominalValue: '',
+            nominalUnit: '',
+            tolerance: ''
+          };
+        });
+        next[serviceIdx] = { ...next[serviceIdx], components: comps };
+        setEditData({ ...editData, services: next });
+        setEditingServiceIdx(serviceIdx);
+        setEditingComponentIdx(componentIdx);
+        setShowHousingsModal(true);
+        return;
+      }
+      comps[componentIdx].housings = [];
+    }
+    next[serviceIdx] = { ...next[serviceIdx], components: comps };
+    setEditData({ ...editData, services: next });
   };
 
   const openHousingsModalForComponent = (serviceIdx, componentIdx) => {
@@ -988,67 +1039,17 @@ export default function WorkOrderDetail() {
                             + Agregar técnico
                           </button>
                         </div>
-                        <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e8e6ef' }}>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: '#5c5966' }}>Componentes</span>
-                          {(os.components || [createDefaultComponent(generalComponentId)]).map((comp, ci) => (
-                            <div key={ci} style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                              <div style={{ flex: '2 1 180px', minWidth: 140 }}>
-                                <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Componente</label>
-                                <select
-                                  value={comp.componentId}
-                                  onChange={(e) => {
-                                    const next = [...(editData.services || [])];
-                                    const comps = [...(next[idx].components || [])];
-                                    comps[ci] = { ...comps[ci], componentId: e.target.value };
-                                    next[idx] = { ...next[idx], components: comps };
-                                    setEditData({ ...editData, services: next });
-                                  }}
-                                >
-                                  <option value="">Seleccionar...</option>
-                                  {componentsCatalog.map((c) => (
-                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                  ))}
-                                </select>
-                              </div>
-                              {needsOrderHousings && (
-                                <>
-                                  <div style={{ flex: '0 1 90px', minWidth: 80 }}>
-                                    <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Alojamientos</label>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      value={comp.housingCount || ''}
-                                      onChange={(e) => {
-                                        const count = Number(e.target.value) || 0;
-                                        const next = [...(editData.services || [])];
-                                        const comps = [...(next[idx].components || [])];
-                                        const existing = comps[ci].housings || [];
-                                        comps[ci] = {
-                                          ...comps[ci],
-                                          housingCount: e.target.value,
-                                          housings: count > 0
-                                            ? Array.from({ length: count }).map((_, i) => existing[i] || {
-                                                measureCode: numberToLetters(i + 1),
-                                                description: '',
-                                                nominalValue: '',
-                                                nominalUnit: '',
-                                                tolerance: ''
-                                              })
-                                            : []
-                                        };
-                                        next[idx] = { ...next[idx], components: comps };
-                                        setEditData({ ...editData, services: next });
-                                        if (count > 0) openHousingsModalForComponent(idx, ci);
-                                      }}
-                                      placeholder="0"
-                                    />
-                                  </div>
-                                  <button type="button" className="btn-secondary" style={{ padding: '8px 12px' }} onClick={() => openHousingsModalForComponent(idx, ci)} title="Configurar alojamientos">📋</button>
-                                </>
-                              )}
-                            </div>
-                          ))}
-                        </div>
+                        <WorkOrderServiceComponentsEditor
+                          components={os.components || []}
+                          componentsCatalog={componentsCatalog}
+                          needsOrderHousings={needsOrderHousings}
+                          generalComponentId={generalComponentId}
+                          createDefaultComponent={createDefaultComponent}
+                          onUpdateComponent={(ci, field, value) => updateServiceComponent(idx, ci, field, value)}
+                          onAddComponent={() => addComponentToService(idx)}
+                          onRemoveComponent={(ci) => removeComponentFromService(idx, ci)}
+                          onOpenHousingsModal={(ci) => openHousingsModalForComponent(idx, ci)}
+                        />
                       </div>
                     ))}
                     <button

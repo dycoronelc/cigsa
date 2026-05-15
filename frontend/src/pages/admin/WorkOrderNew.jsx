@@ -13,6 +13,8 @@ import {
   totalHousingCount,
   GENERAL_COMPONENT_NAME
 } from '../../utils/workOrderComponents';
+import WorkOrderServiceComponentsEditor from '../../components/WorkOrderComponentsEditor';
+import '../../components/WorkOrderComponentsEditor.css';
 import './WorkOrderNew.css';
 
 export default function WorkOrderNew() {
@@ -569,62 +571,17 @@ export default function WorkOrderNew() {
                     + Agregar técnico
                   </button>
                 </div>
-                <div style={{ width: '100%', marginTop: 10, padding: '10px 0 4px', borderTop: '1px dashed #e8e6ef' }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#5c5966' }}>Componentes</span>
-                  {(os.components || [createDefaultComponent(generalComponentId)]).map((comp, ci) => (
-                    <div key={ci} style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                      <div style={{ flex: '2 1 180px', minWidth: 140 }}>
-                        <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Componente</label>
-                        <select
-                          value={comp.componentId}
-                          onChange={(e) => updateServiceComponent(idx, ci, 'componentId', e.target.value)}
-                        >
-                          <option value="">Seleccionar...</option>
-                          {componentsCatalog.map((c) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      {needsOrderHousings && (
-                        <>
-                          <div style={{ flex: '0 1 90px', minWidth: 80 }}>
-                            <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Alojamientos</label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={comp.housingCount || ''}
-                              onChange={(e) => updateServiceComponent(idx, ci, 'housingCount', e.target.value)}
-                              placeholder="0"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            className="btn-secondary"
-                            onClick={() => openHousingsModalForComponent(idx, ci)}
-                            title="Configurar alojamientos"
-                            style={{ padding: '8px 12px' }}
-                          >
-                            📋
-                          </button>
-                        </>
-                      )}
-                      {(os.components || []).length > 1 && (
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          style={{ padding: '8px 12px' }}
-                          onClick={() => removeComponentFromService(idx, ci)}
-                          title="Quitar componente"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={() => addComponentToService(idx)}>
-                    + Agregar componente
-                  </button>
-                </div>
+                                <WorkOrderServiceComponentsEditor
+                  components={os.components || []}
+                  componentsCatalog={componentsCatalog}
+                  needsOrderHousings={needsOrderHousings}
+                  generalComponentId={generalComponentId}
+                  createDefaultComponent={createDefaultComponent}
+                  onUpdateComponent={(ci, field, value) => updateServiceComponent(idx, ci, field, value)}
+                  onAddComponent={() => addComponentToService(idx)}
+                  onRemoveComponent={(ci) => removeComponentFromService(idx, ci)}
+                  onOpenHousingsModal={(ci) => openHousingsModalForComponent(idx, ci)}
+                />
               </div>
             ))}
             <button type="button" className="btn-secondary" onClick={addService} style={{ marginTop: 4 }}>

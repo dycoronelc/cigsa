@@ -12,7 +12,8 @@
     "migrate-equipment": "node scripts/migrate-equipment-schema.js",
     "import-equipment": "node scripts/import-equipment-from-excel.js",
     "associate-manual": "node scripts/associate-manual-to-equipment.js",
-    "create-missing-tables": "node scripts/create-missing-tables.js"
+    "create-missing-tables": "node scripts/create-missing-tables.js",
+    "migrate-components": "node scripts/migrate-components.js"
   },
   "keywords": [],
   "author": "",
